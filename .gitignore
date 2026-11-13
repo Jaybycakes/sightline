@@ -1,0 +1,9 @@
+# Big raw downloads live in the shared Google Drive, not git
+*.tif
+*.tiff
+*.zip
+*.IMG
+raw/
+.venv/
+__pycache__/
+.DS_Store
