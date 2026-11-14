@@ -14,7 +14,7 @@ Three modes:
 
 ## Files to create
 ```
-/route/route.js        export function planRoute(grid, bounds, viewsheds, start, goal, opts) → route object
+/route/route.js        export function planRoute(grid, bounds, vis, start, goal, opts) → route object
 /route/heap.js         tiny binary min-heap for A* (or inline in route.js)
 /route/route.test.html browser test page with console.assert checks + PASS/FAIL list
 ```
@@ -22,9 +22,10 @@ Three modes:
 ## Inputs
 - `grid` = `data/heightgrid.json` (399 × 378, 80 m cells; row 0 north). Use `lib/geo.js` helpers.
 - `bounds` = `meta.bounds`.
-- `viewsheds` = `{ blind: Uint8Array(w*h), homeHidden: Uint8Array(w*h) }` — 1 = blind / home hidden. Built by `map/visibility.js` from the viewshed PNGs (Brayden exports a function `getVisibilityArrays()`; until then build a mock with all zeros).
+- `vis` = `{ blind: Uint8Array(w*h), homeHidden: Uint8Array(w*h), w, h }` — 1 = blind / home hidden. From `visibilityArrays(visKm)` in `map/visibility.js` (the pipeline passes it in). Tests: build one with all zeros. **Assert `vis.w === grid.w && vis.h === grid.h`**, else return `{ok:false, reason:'visibility grid size mismatch'}`.
 - `start`, `goal` = `{lat, lon}`.
-- `opts` = `{ mode, maxSlopeDeg, speedKmh }` — `maxSlopeDeg` and `speedKmh` come from the Walk Budget (`budget.maxSlopeDeg`, `budget.speedKmh`).
+- `opts` = `{ mode, maxSlopeDeg, speedKmh, maxExpansions = 400000 }` — `maxSlopeDeg` and `speedKmh` come from `computeLimits()` (crew), **not** from the budget (that would be circular — ARCHITECTURE.md §5).
+- Signature is fixed: `planRoute(grid, bounds, vis, start, goal, opts)`. Pure function, **never throws** — any failure returns `{ ok:false, reason }`. Start/goal outside the grid → `{ok:false, reason:'outside map'}`. Start cell itself too steep/blocked → start from the nearest allowed cell.
 
 ## Algorithm (A* on the grid)
 - Nodes = grid cells; 8 neighbours.
@@ -48,7 +49,7 @@ If no path: `{ ok: false, reason: 'All paths exceed 10° slope limit (sol 3 crew
 
 ## How it's used
 - Map click in Plan mode → `planRoute(start = astronaut, goal = clicked point)`. Draw `safest` solid and `shortest` dashed so judges see the trade-off ("+6 min, but home stays in sight 85% of the way").
-- **Route home** is re-planned automatically when: the solar storm starts, budget turns RED, or τ changes the blind zones. Its `lengthKm` feeds `computeBudget` as `routeHomeKm`.
+- **When routes are re-planned is decided by `lib/pipeline.js`, not by route code** (route key: mode | target | maxSlope | visibility km | storm | every 10 EVA min — ARCHITECTURE.md §5). The pipeline turns `routeHome` into `routeHomeKm` for `computeBudget`. Route code never touches the store.
 - Edward's helmet view walks along `points`.
 - Save the demo route to `data/route_demo.json` (same shape) so the helmet view can use it standalone.
 

@@ -75,6 +75,9 @@ https://atmos.nmsu.edu/PDS/data/PDS4/Mars2020/mars2020_meda/data_derived_env/sol
 ```
 Columns: `SCLK, LMST, LTST, PRESSURE, ...`. Browse the same sol folder for the air-temperature product (file name contains `ATS`) — verify the name before scripting. Output `data/meda_sol.json`: `[{ltst, pressurePa, tempC}]` for one sol → the demo player can use real pressure/temperature by time of day.
 
+## Gate
+Run `python3 scripts/check_data.py` after every data change. It checks every contract (ARCHITECTURE.md §7) and fails on missing files, NaN, wrong sizes, swapped lat/lon, duplicate ids, and constants marked NASA data without a source.
+
 ## Acceptance checklist
 - [ ] Challenge Resources tab checked, used resources listed word for word.
 - [ ] All files in root README section 6 exist with the right shape.

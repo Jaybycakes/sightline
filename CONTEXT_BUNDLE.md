@@ -11,7 +11,7 @@
 **NASA Space Apps Challenge 2026 · Jakarta · Challenge: "Interplanetary Survival Guide: Martian Map" (Jezero Crater)**
 Team: Brayden, Jojo, Sean, Edward
 
-> **How to use this file with Claude:** paste this README **plus** the README of your feature folder into Claude (or open the repo in Claude Code — it reads `CLAUDE.md`). This file is the shared truth: concept, data formats, file layout, rules. Your feature file is the detailed build spec. If the two disagree, this file wins — tell the team.
+> **How to use this file with Claude:** paste `CONTEXT_BUNDLE.md` (everything in one file) into Claude, or open the repo in Claude Code — it reads `CLAUDE.md`. This README = concept, data formats, file layout, rules. **`ARCHITECTURE.md` = how the system fits together (state, pipeline, function signatures, failure handling, security).** Your feature README = the detailed build spec. Priority if they disagree: ARCHITECTURE.md → README.md → feature README. Tell the team.
 
 ---
 
@@ -153,6 +153,11 @@ All files live in `data/`. Sean (and `scripts/`) produce them. Everyone else rea
   "data": [ -2567.2, -2566.9, "... w*h numbers, metres, row-major, row 0 = north, 1 decimal" ] }
 ```
 
+**No NaN / null allowed** — fill DTM no-data with the nearest valid value before writing (Python writes `NaN`, which is invalid JSON and kills the app).
+
+### `data/basemap.png`
+Hillshade image of the DTM (full working-grid extent, ≥ 1596 × 1512 px, grayscale). Drawn under the Mars Trek tiles as an offline fallback if the tile server is slow during judging.
+
 ### `data/heightmap.png`
 Same grid as an 8-bit grayscale PNG (399 × 378). Pixel value v → elevation = min + v/255 × (max − min). For quick visuals only; use `heightgrid.json` for maths.
 
@@ -204,6 +209,8 @@ Raw response of the NASA DONKI SEP API for May 2024 (see `data/README.md`).
 }
 ```
 
+**Coordinate order everywhere in our files and functions: `[lat, lon]` or `{lat, lon}`.** GeoJSON's `[lon, lat]` is converted inside `scripts/fetch_nasa.py` only.
+
 ### `route.json` / route object (produced by `route/route.js`)
 ```json
 { "mode": "safest", "points": [[18.4447, 77.4508], [18.45, 77.44]], "lengthKm": 3.2,
@@ -215,31 +222,13 @@ See `skyline/README.md`.
 
 ---
 
-## 7. Shared app state (`lib/store.js`)
+## 7. Shared app state — see `ARCHITECTURE.md` §4–§5
 
-One state object. Anyone can read, set and subscribe. Brayden writes it in the first hour:
-```js
-// Written with AI assistance
-const state = {
-  sol: 12,                 // sols since landing
-  ltst: 9.0,               // local true solar time, hours (0-24)
-  evaMin: 0,               // minutes since EVA start
-  astronaut: { lat: 18.4447, lon: 77.4508, headingDeg: 0 },
-  posUncertaintyM: 30,     // radius of the uncertainty circle
-  tau: 0.4,                // dust optical depth
-  sepActive: false,        // solar particle event in progress
-  pressurePa: 718,         // MEDA surface pressure
-  tempC: -40,              // air temperature
-  sansAffected: true,      // crew member has spaceflight vision changes
-  route: null,             // route object (section 6)
-  budget: null             // output of crew/budget.js computeBudget()
-};
-const subs = new Set();
-export function getState() { return state; }
-export function setState(patch) { Object.assign(state, patch); subs.forEach(f => f(state)); }
-export function subscribe(fn) { subs.add(fn); fn(state); return () => subs.delete(fn); }
-```
-Main app → helmet iframe: `iframe.contentWindow.postMessage({ type: 'sightline:state', state }, '*')` on every change.
+Summary (the full contract, function signatures and rules live in ARCHITECTURE.md):
+- `lib/store.js` holds `{ data, inputs, derived }`. **Only `setInputs(patch)` changes state**; it runs the pipeline and notifies subscribers once.
+- `lib/pipeline.js` computes, in this fixed order: `computeLimits` → visibility → `planRoute` (home + target) → `computeBudget`.
+- Renderers `subscribe()` and **only read**. Calling `setInputs` inside a subscriber throws.
+- Main app ↔ helmet iframe: same-origin `postMessage` with a `hello` handshake and versioned messages (ARCHITECTURE §9).
 
 ---
 
@@ -287,19 +276,287 @@ Commit at least every hour. If `git push` fails: `git pull --rebase` then push a
 
 ---
 
+# FILE: `ARCHITECTURE.md`
+
+# Sightline — System Architecture
+
+**Read this after `README.md`. If a feature README disagrees with this file, this file wins.**
+Owner: Brayden (changes go through the team chat first).
+
+---
+
+## 1. Design principles (the rules everything else follows)
+
+1. **Offline-first, static only.** The judged app is plain files on GitHub Pages. **Zero runtime calls to our own servers or to NASA APIs.** All NASA data is fetched and processed **once, offline, by Python**, then committed to `data/`. Runtime external dependencies are only: Mars Trek map tiles + 2 pinned CDN libraries + Google Fonts — and each has a fallback (section 8).
+2. **One-way data flow.** UI and the demo player change **inputs**. One pipeline turns inputs into **derived** results. Renderers only read. Nothing that renders is allowed to write state.
+3. **Pure maths, isolated side effects.** `computeLimits`, `computeBudget`, `planRoute`, `stateAt` are pure functions (same input → same output, no DOM, no fetch). They can be tested on their own and shared with the helmet view.
+4. **Validate at every boundary.** Every file is checked when loaded. Bad or missing data fails **loudly** on screen — never silently.
+5. **Truth labels everywhere.** Every science number comes from `data/crew_constants.json` with `isEstimate`. Every mock file shows a visible **MOCK DATA** badge. Nothing can pass as NASA data by accident.
+6. **Deterministic demo.** The scenario is a pure function of time `t`. Scrubbing back and forth always gives the same screen — the 30-second video is reproducible.
+
+---
+
+## 2. System overview
+
+```mermaid
+flowchart LR
+  subgraph OFFLINE["Offline (Python, run by hand)"]
+    DTM[CTX DTM .tif] --> MG[make_grid.py]
+    MG --> GRID[heightgrid.json / meta.json / heightmap.png / basemap.png]
+    GRID --> LM[landmarks.py] --> LMJ[landmarks.json]
+    LMJ --> VS[viewsheds.py] --> VSP[viewsheds/*.png]
+    DTM --> SK[skyline.py] --> SKJ[skyline/*.json]
+    API[NASA APIs: waypoints, DONKI, MEDA] --> FN[fetch_nasa.py] --> NJ[traverse / targets / donki / meda .json]
+    ALL[all data/*] --> CHK[check_data.py ✔ gate]
+  end
+  subgraph BROWSER["Browser (static app)"]
+    LOAD[lib/data.js loadAll + validate] --> PIPE
+    UI[controls / scenario player] -- setInputs --> STORE[(lib/store.js)]
+    STORE --> PIPE[lib/pipeline.js derive]
+    PIPE --> STORE
+    STORE -- subscribe, read-only --> R1[map renderers] & R2[panels] & R3[skyline panel] & BR[helmet bridge]
+    BR -- postMessage same-origin --> HEL[helmet iframe]
+  end
+  CHK --> LOAD
+```
+
+---
+
+## 3. Components and ownership
+
+| Layer | Module | Owner | Kind | Responsibility |
+|---|---|---|---|---|
+| Offline | `scripts/*.py` | Sean, Brayden | batch | Produce every file in `data/` |
+| Offline | `scripts/check_data.py` | Brayden | gate | Validate every contract in `data/` (must pass before submitting) |
+| Core | `lib/geo.js` | Brayden | pure | Coordinates, distance, bearing, grid ↔ lat/lon |
+| Core | `lib/store.js` | Brayden | state | Holds `{inputs, derived, data}`; the only place state lives |
+| Core | `lib/data.js` | Brayden | I/O | Load + validate all `data/` files (real → mock fallback, records which) |
+| Core | `lib/pipeline.js` | Brayden | orchestrator | Runs derive steps in fixed order; caches expensive steps |
+| Model | `crew/budget.js` | Jojo | pure | `computeLimits`, `computeBudget` |
+| Model | `route/route.js` | Jojo | pure | `planRoute` (A*) |
+| Model | `map/visibility.js` | Brayden | pure + cache | `visibilityArrays(visKm)` from viewshed PNGs |
+| Model | `map/scenario.js` | Brayden | pure | `stateAt(t)` → inputs for the demo |
+| View | `map/map.js`, `map/panels.js` | Brayden | render | Leaflet layers, budget card, alerts, controls, sources modal |
+| View | `skyline/skyline.js` | Brayden + Sean | render | Skyline Fix panel (reads precomputed results) |
+| View | `helmet/*` | Edward | render | 3D view in an iframe, receives state by message |
+
+**Rule:** only the owner edits a module. Everyone else uses its exported functions exactly as written in section 5.
+
+---
+
+## 4. State model
+
+```js
+store = {
+  data:    { meta, grid, landmarks, targets, traverse, constants, scenario, skyline, viewsheds, status },  // loaded once, read-only
+  inputs:  { ... },   // written ONLY by setInputs() (controls, scenario player, skyline fix)
+  derived: { ... }    // written ONLY by lib/pipeline.js
+}
+```
+
+### `inputs` (everything a user or the scenario can change)
+| Field | Type / unit | Notes |
+|---|---|---|
+| `sol` | integer ≥ 0 | sols since landing |
+| `ltst` | hours 0–24 (Mars local true solar time) | |
+| `evaMin` | **Earth** minutes since EVA start | Mars hour = 61.65 Earth min |
+| `astronaut` | `{lat, lon, headingDeg}` | the position the crew **believes** (best estimate) |
+| `distSinceFixM` | metres walked since the last position fix | drives uncertainty growth |
+| `fixUncertaintyM` | metres | uncertainty right after the last fix (30 m at home, Skyline Fix result later) |
+| `tau` | dust optical depth, 0.1–10 | |
+| `sepActive` | boolean | solar particle event |
+| `pressurePa`, `tempC` | Pa, °C | |
+| `sansAffected` | boolean | |
+| `routeMode` | `'shortest' \| 'safest' \| 'homeInSight'` | |
+| `target` | `{lat, lon, id?} \| null` | where the crew is heading (null = home) |
+| `scenarioT` | Earth minutes \| null | null = free mode (sliders) |
+
+### `derived` (computed, never set by hand)
+| Field | From |
+|---|---|
+| `limits` = `{speedKmh, maxSlopeDeg, visibilityKm}` | `computeLimits(inputs, C)` |
+| `posUncertaintyM` | `fixUncertaintyM + C.dead_reckoning_drift_pct/100 × distSinceFixM` |
+| `vis` = `{blind, homeHidden, w, h, homeVisiblePct3km}` | `visibilityArrays(limits.visibilityKm)` |
+| `routeOut` | `planRoute(... astronaut → target ...)` (null if no target) |
+| `routeHome` | `planRoute(... astronaut → home, mode 'safest' ...)` |
+| `routeHomeKm` | remaining length of `routeHome` from the astronaut |
+| `budget` | `computeBudget(inputs, limits, routeHomeKm, C)` |
+| `warnings` | data/mocks/validation problems to show on screen |
+
+---
+
+## 5. The pipeline (fixes the route ↔ budget circular dependency)
+
+The walk budget needs the length of the route home; the route planner needs the slope limit and speed. That was a circle. It is broken by splitting the crew model into **limits** (no route needed) and **budget** (needs route):
+
+```
+setInputs(patch)
+  └─► pipeline.derive(inputs, data, prevDerived)          // synchronous, fixed order
+        1. limits   = computeLimits(inputs, C)                      [crew/budget.js]
+        2. posUncertaintyM                                          [pipeline]
+        3. vis      = visibilityArrays(round(limits.visibilityKm))  [map/visibility.js]  cached by key
+        4. routeHome, routeOut = planRoute(...)                     [route/route.js]     cached by key
+        5. routeHomeKm = remaining length along routeHome            [lib/geo.js]
+        6. budget   = computeBudget(inputs, limits, routeHomeKm, C) [crew/budget.js]
+  └─► store.derived = result  →  notify subscribers ONCE
+```
+
+### Function signatures (binding contracts)
+```js
+// crew/budget.js
+export function computeLimits(inputs, C)                       // → { speedKmh, maxSlopeDeg, visibilityKm }
+export function computeBudget(inputs, limits, routeHomeKm, C)  // → budget object (crew/README.md "Output")
+
+// route/route.js
+export function planRoute(grid, bounds, vis, start, goal, opts) // opts = { mode, maxSlopeDeg, speedKmh, maxExpansions = 400000 }
+                                                                 // → route object (README section 6), never throws: { ok:false, reason } on failure
+
+// map/visibility.js
+export function initVisibility(viewsheds, landmarks, grid, bounds) // once, after data load
+export function visibilityArrays(visKm)                            // → { blind: Uint8Array, homeHidden: Uint8Array, w, h, homeVisiblePct3km }
+
+// map/scenario.js
+export function stateAt(scenario, t, data)                     // → inputs patch for time t (pure, deterministic)
+
+// lib/pipeline.js
+export function derive(inputs, data, prev)                     // → derived
+```
+
+### Caching rules (keep it fast)
+- **Visibility** recomputes only when `round(visibilityKm)` changes (≤ ~150 values) — cache by that key.
+- **Routes** are replanned only when the **route key** changes:
+  `mode | target | maxSlopeDeg | round(visibilityKm) | sepActive | floor(evaMin / 10)`.
+  The astronaut's movement does **not** replan every tick; between replans `routeHomeKm` = remaining length along the cached route + distance from the astronaut to the nearest route point.
+- Budgets: A* ≤ 400k expansions (≈ < 300 ms); visibility ≤ 50 ms; one full `derive` ≤ 16 ms when caches hit.
+
+### Store rules (prevents infinite loops)
+```js
+export function setInputs(patch)   // validates + merges into a NEW inputs object, runs derive, notifies once
+export function subscribe(fn)      // fn(store) — read-only
+export function getStore()         // returns the current frozen snapshot
+```
+- State objects are **replaced, never mutated** (`inputs = {...inputs, ...patch}`); snapshots are `Object.freeze`d.
+- Calling `setInputs` **while subscribers are being notified throws** an error ("renderers must not write state"). Renderers that need to react (e.g. auto-open Skyline Fix) do it through a user action or the scenario, not inside a subscriber.
+- `setInputs` rejects unknown keys and out-of-range values (`tau` 0.1–10, `ltst` 0–24, `sol` 0–1000, lat/lon inside `meta.bounds`) — it clamps numbers and logs a warning.
+
+---
+
+## 6. The demo scenario (deterministic)
+
+- `scenario_demo.json` events are applied in order of `tMin` (ties: file order).
+- `stateAt(scenario, t, data)` builds the inputs **from scratch for any `t`**: start state → apply every event with `tMin ≤ t` → place the astronaut along the planned legs.
+- Legs are planned **once** and cached: outbound leg at `t = 0` (start → target); at `sep_onset` a return leg from the position at that moment → home (mode `safest`). Same inputs → same legs → same video every time.
+- Movement speed along a leg = `computeLimits(...).speedKmh` at that time.
+- `distSinceFixM` grows with distance walked; a `skyline_fix` event sets `fixUncertaintyM = skyline.uncertaintyM` and `distSinceFixM = 0`.
+- Player clock: 1 real second = 2 EVA minutes (configurable), `requestAnimationFrame`, paused when the tab is hidden.
+
+---
+
+## 7. Data layer
+
+### Loading (`lib/data.js`)
+For each file: try `data/<file>` → if 404/invalid, try the mock (`map/mock/<file>.mock.json` or the module's own mock) → record `status[file] = 'real' | 'mock' | 'missing'`.
+**Any `mock` or `missing` → a fixed "MOCK DATA: …" badge on screen.** The submission checklist requires zero mocks.
+
+### Validation (browser `lib/data.js` and offline `scripts/check_data.py` check the same rules)
+| File | Must hold |
+|---|---|
+| `meta.json` | bounds as in README; `home` inside bounds |
+| `heightgrid.json` | `data.length === w*h`; **every value a finite number** (no NaN/null — Python must fill no-data before `json.dump`, because `NaN` is not valid JSON); `min ≤ value ≤ max` |
+| `viewsheds/<id>.png` | one per landmark id; **exactly `w × h` of the grid**; values only 0/255 |
+| `landmarks.json` | unique ids; `home` present; all inside bounds |
+| `targets.json`, `traverse.json` | inside bounds; `traverse` sorted by sol |
+| `crew_constants.json` | unique keys; **all keys the model needs exist** (list in `crew/README.md`); every `isEstimate:false` row has a non-empty, non-TODO `url` |
+| `scenario_demo.json` | events sorted; `target` exists in `targets.json`; `skyline_fix.site` exists in `data/skyline/` |
+| `skyline/<site>.json` | `observed.length === best.length === 360/azStepDeg`; `grid.rmsDeg.length === n*n` |
+
+### Coordinate and unit conventions (one way only)
+- Points in our files and functions: **`[lat, lon]`** arrays or `{lat, lon}` objects. GeoJSON's `[lon, lat]` order is converted **inside `fetch_nasa.py`** and never leaves it.
+- Distances in **metres** internally; km only in UI text. Angles in **degrees**, azimuth 0 = north, clockwise.
+- Time: `evaMin`, `tMin` = Earth minutes; `ltst` = Mars hours; `sol` = Mars days.
+- Grid row 0 = north, col 0 = west; east–west metres × cos(lat).
+
+---
+
+## 8. Failure modes and fallbacks
+
+| What fails | What the user sees | Mitigation |
+|---|---|---|
+| Mars Trek tiles slow/down during judging | Map still shows terrain | `data/basemap.png` (hillshade from the DTM, made by `make_grid.py`) is drawn under the tiles as an `L.imageOverlay` |
+| A data file missing/invalid | MOCK DATA badge + warning list | loader fallback + validation messages |
+| Route impossible (slopes) | "No safe route: all paths exceed 10° slope limit (sol 3 crew)" | `planRoute` returns `{ok:false, reason}` — it is a safety message, not an error |
+| A* too slow | Route = last good route + note | `maxExpansions` cap |
+| Helmet iframe not built yet / errors | Map app unaffected | iframe isolation; bridge ignores send failures |
+| CDN (Leaflet/A-Frame) fails | Error card "Map library failed to load — reload" | pinned versions; `window.L` check at boot |
+| JS exception in one renderer | Others keep working | each subscriber wrapped in `try/catch`, error shown in warnings |
+| Browser without WebGL | Helmet button disabled with a note | feature check before opening |
+
+---
+
+## 9. Security and integrity
+
+- **No secrets in the repo or the browser.** No API keys at runtime (all API data pre-fetched). DEMO_KEY used only offline. `check_data.py` greps `data/` for `api_key=` values other than `DEMO_KEY`.
+- **postMessage is same-origin only.** Parent sends `iframe.contentWindow.postMessage(msg, location.origin)`. Helmet accepts a message only if `e.origin === location.origin && e.source === window.parent && msg.type` is one of the known types.
+- **Message protocol (versioned):**
+  - helmet → parent: `{ type: 'sightline:hello', v: 1 }` when ready
+  - parent → helmet: `{ type: 'sightline:state', v: 1, inputs, derived: { limits, budget, routeHome, posUncertaintyM } }` (no big arrays — typed arrays are **not** sent)
+  - parent replies to `hello` immediately with the current state, so the helmet never misses the first update.
+- **No `innerHTML` with data.** All text from JSON is inserted with `textContent`. Source links are rendered only if they start with `https://`, with `rel="noopener noreferrer"`.
+- **Pinned dependencies:** Leaflet 1.9.4 (cdnjs), A-Frame 1.6.0. No `@latest`.
+- **Honest claims:** Skyline Fix results always carry their `method` text ("simulated skyline"). Budget factors always show NASA data / Estimate tags.
+
+---
+
+## 10. Loophole audit (what was wrong in the first specs and how it is closed)
+
+| # | Loophole | Impact | Fix (where enforced) |
+|---|---|---|---|
+| 1 | `crew/wire.js` subscribed to the store and called `setState` inside the subscriber | infinite update loop / frozen tab | single pipeline (§5); `setInputs` throws during notify (`lib/store.js`) |
+| 2 | Budget needs route length, route needs budget's slope/speed | circular dependency, undefined order | split into `computeLimits` → route → `computeBudget` (§5) |
+| 3 | `Object.assign` mutated shared state | subscribers can't tell what changed; helmet gets half-updated objects | immutable snapshots, frozen (§5) |
+| 4 | Route replanned on every change, incl. every movement tick | A* running 10×/s, lag | route key cache + 10-min refresh (§5) |
+| 5 | `postMessage(..., '*')`, no origin check | any page could inject fake state into the helmet | same-origin + source + type checks (§9) |
+| 6 | Helmet could load after the first state message | empty HUD | `hello` handshake (§9) |
+| 7 | Python `json.dump` writes `NaN` for no-data | `JSON.parse` fails → app dead | fill no-data; validator (§7) |
+| 8 | Viewshed PNG size could differ from the grid | wrong cells marked blind | size check in validator + loader (§7) |
+| 9 | Mock fallback was silent | mock data could appear in the judged demo as NASA data | MOCK DATA badge + zero-mock gate (§7) |
+| 10 | Mixed `[lon,lat]` (GeoJSON) and `[lat,lon]` (Leaflet) | points in the wrong place | one convention, converted only in `fetch_nasa.py` (§7) |
+| 11 | Earth minutes vs Mars hours mixed | wrong LTST → wrong dust-devil/cold alerts | units table (§7) |
+| 12 | Astronaut shown as an exact point | contradicts "no GPS" | believed position + uncertainty that grows with distance, reset by Skyline Fix (§4, §6) |
+| 13 | Demo built by accumulating ticks | scrubbing back breaks; video not reproducible | `stateAt(t)` pure (§6) |
+| 14 | Runtime dependence on NASA APIs (DEMO_KEY rate limits, CORS) | demo fails while judges watch | everything pre-fetched (§1) |
+| 15 | Map tiles are an external dependency | blank map if Trek is down | local hillshade basemap (§8) |
+| 16 | Constants could be missing / sources TODO while marked NASA data | silent `undefined` maths; false claims | required-keys check + url rule (§7) |
+| 17 | Data from JSON put into HTML | injection | `textContent` only, https-only links (§9) |
+
+---
+
+## 11. Build order (dependencies)
+
+1. `lib/geo.js`, `lib/store.js`, `lib/data.js` (with mocks), `lib/pipeline.js` with **stub** `computeLimits`/`computeBudget`/`planRoute` → the app runs end to end on mocks.
+2. In parallel: real `crew/budget.js` (Jojo), real `route/route.js` (Jojo), `make_grid.py` → `landmarks.py` → `viewsheds.py` (Sean/Brayden), helmet on mock grid (Edward).
+3. Swap stubs for real modules (same signatures — nothing else changes).
+4. `skyline.py` + Skyline panel; scenario polish.
+5. `check_data.py` passes with zero mocks → freeze → video → submit.
+
+---
+
 # FILE: `CLAUDE.md`
 
 # Rules for Claude working in this repo
 
-1. Read `README.md` first (shared concept, file formats, coordinate rules), then the README of the folder you are working in. That folder README is the build spec.
-2. Only create/edit files inside the folder you were asked to work in (plus the files that folder's README says it owns). Do not change another folder's files or the data contracts in `README.md` section 6 — if a contract must change, stop and say so.
+1. Read `README.md` (concept, file formats), then `ARCHITECTURE.md` (state, pipeline, exact function signatures, failure handling, security), then the README of the folder you are working in. Priority if they disagree: ARCHITECTURE.md → README.md → folder README.
+2. Only create/edit files inside the folder you were asked to work in (plus the files that folder's README says it owns). Do not change another folder's files, the function signatures in ARCHITECTURE.md §5, or the data contracts in README.md §6 — if one must change, stop and say so.
 3. No build step: plain HTML/CSS/JS ES modules, Leaflet 1.9.4 and A-Frame 1.6.0 from CDN, Python 3 + numpy + Pillow for scripts. No npm, no frameworks, no backend server.
-4. If a data file from `data/` does not exist yet, create a small mock that follows the exact same shape, name it `*.mock.json`, and load the real file first with the mock as fallback.
-5. Every number shown to the user that comes from science must come from `data/crew_constants.json` (or another `data/` file) — never hard-code a magic number in UI code. Show whether it is NASA data or an estimate.
-6. Start each new code file with: `// Written with AI assistance (Claude / GitHub Copilot)` (Python: `#`). Hackathon rules require declaring AI use.
-7. No NASA logos, meatball, mission patches or NASA branding in UI or images.
-8. English only in UI text.
-9. Keep it small and working. A demo that runs beats a big feature that doesn't.
+4. Never write state from a renderer/subscriber. Only `setInputs()` changes state; derived values come from `lib/pipeline.js`. Model functions (`computeLimits`, `computeBudget`, `planRoute`, `stateAt`) stay pure: no DOM, no fetch.
+5. Never call NASA or other APIs at runtime — the app only reads files in `data/` (plus map tiles). Never put API keys in the repo.
+6. If a data file from `data/` does not exist yet, use a mock with the exact same shape named `*.mock.json`, loaded only as a fallback through `lib/data.js`, which marks it so the UI shows a MOCK DATA badge. Never make mock data look real.
+7. Every number shown to the user that comes from science must come from `data/crew_constants.json` (or another `data/` file) — never hard-code a magic number in UI code. Show whether it is NASA data or an estimate.
+8. Insert text from data files with `textContent`, never `innerHTML`. Links only if they start with `https://`.
+9. Coordinates are `[lat, lon]` / `{lat, lon}` everywhere; metres and degrees internally; `evaMin` = Earth minutes, `ltst` = Mars hours.
+10. Start each new code file with: `// Written with AI assistance (Claude / GitHub Copilot)` (Python: `#`). Hackathon rules require declaring AI use.
+11. No NASA logos, meatball, mission patches or NASA branding in UI or images. English only in UI text.
+12. Keep it small and working. A demo that runs beats a big feature that doesn't.
 
 ---
 
@@ -318,8 +575,11 @@ This is the screen judges see. It shows the Jezero map and the astronaut's posit
 /index.html            page shell, loads Leaflet CSS/JS from cdnjs, <script type="module" src="map/app.js">
 /styles.css            all main-app styles
 /lib/geo.js            exactly as in root README section 5
-/lib/store.js          exactly as in root README section 7
-/map/app.js            boot: load data files, create map, mount panels, subscribe to store
+/lib/store.js          setInputs / subscribe / getStore (ARCHITECTURE.md §5 store rules)
+/lib/data.js           loadAll(): real file → mock fallback, validation, status per file (ARCHITECTURE.md §7)
+/lib/pipeline.js       derive(inputs, data, prev): limits → visibility → routes → budget, with caches (§5)
+/map/stubs.js          temporary computeLimits / computeBudget / planRoute with the real signatures, used until crew/ and route/ land
+/map/app.js            boot: loadAll → initVisibility → first setInputs → mount renderers (subscribers, read-only)
 /map/map.js            Leaflet map, base layers, markers, route + traverse lines, uncertainty circle
 /map/visibility.js     blind-zone overlay (combine viewshed PNGs, dust visibility cut-off)
 /map/panels.js         walk budget panel, alert list, sources/"how we know" modal, controls
@@ -327,14 +587,14 @@ This is the screen judges see. It shows the Jezero map and the astronaut's posit
 ```
 
 ## First hour (unblocks everyone)
-1. `lib/geo.js`, `lib/store.js` copied from the root README.
-2. `index.html` with an empty map and a right-side panel.
+1. `lib/geo.js`, `lib/store.js`, `lib/data.js`, `lib/pipeline.js`, `map/stubs.js` → app runs end to end on mocks (ARCHITECTURE.md §11).
+2. `index.html` with the map and the right-side panel.
 3. Push. Tell the group.
 
 ## Layout
 - Desktop (≥ 1024 px): map fills the left ~68%; right column = **Walk Budget card** (big status + minutes left), **Alerts** list, **Controls**. A collapsible bottom strip = **scenario timeline** (play/pause, scrub, current sol / LTST / EVA minutes).
 - Mobile (≤ 768 px): map on top (60vh), panels stacked below. No horizontal scroll.
-- A "Helmet view" button opens `helmet/index.html` in an iframe overlay (full-screen modal with close button). Send state to it with `postMessage` (root README section 7).
+- A "Helmet view" button opens `helmet/index.html` in an iframe overlay (full-screen modal with close button). The helmet bridge answers `sightline:hello` and sends `sightline:state` on every change, same-origin only (ARCHITECTURE.md §9).
 - Visual direction: mission-control dark UI over the orbital imagery. Status colours: GREEN `#3fb950`, AMBER `#d29922`, RED `#f85149`. Monospace for numbers (e.g. "IBM Plex Mono" or "JetBrains Mono" from Google Fonts), clean sans for text. Avoid generic template look: no gradient blobs, no tiny label text above every heading, no "01 ·" numbering.
 
 ## Map (map/map.js)
@@ -352,16 +612,18 @@ Layers (use `L.control.layers` to toggle):
 - **Home** marker (habitat icon) + **landmarks** (small triangles, label on hover) from `data/landmarks.json`.
 - **Science targets** from `data/targets.json`.
 - **Perseverance traverse** (thin white line) from `data/traverse.json` — label "Real Perseverance route (NASA)". It shows our terrain is real and drivable.
-- **Astronaut** marker with a heading wedge, and an **uncertainty circle** (`L.circle`, radius = `state.posUncertaintyM`). Never draw a precise "blue dot" — the circle is the point of the app.
+- **Astronaut** marker with a heading wedge, and an **uncertainty circle** (`L.circle`, radius = `derived.posUncertaintyM`, which grows with distance walked since the last fix). Never draw a precise "blue dot" — the circle is the point of the app.
 - **Route** polyline(s) from `route/route.js` — `safest` solid, `shortest` dashed.
 - **Blind zones** overlay (below).
 - Click on map → in "Plan" mode, sets the route target and calls `planRoute` (see `route/README.md`).
 
 ## Blind zones (map/visibility.js) — the SEE feature
+Exports `initVisibility(viewsheds, landmarks, grid, bounds)` and `visibilityArrays(visKm)` (ARCHITECTURE.md §5), cached by `round(visKm)`. Viewshed PNG size must equal the grid size — throw at init otherwise.
+
 A cell is **blind** if the astronaut standing there cannot see **any usable landmark** (home included).
 A landmark L is usable from cell X when:
 1. viewshed `data/viewsheds/<L.id>.png` is 255 at X, **and**
-2. distance(X, L) ≤ effective visibility range `visKm` (from the walk budget output: `budget.visibilityKm`, which comes from dust τ and SANS vision — see `crew/README.md`).
+2. distance(X, L) ≤ effective visibility range `visKm` (from the walk budget output: `derived.limits.visibilityKm`, from `computeLimits` — dust τ and SANS vision, see `crew/README.md`).
 
 Implementation:
 ```js
@@ -377,23 +639,25 @@ Implementation:
 - Show the stat line: "Home visible from X% of ground within 3 km" (computed from the same arrays).
 
 ## Panels (map/panels.js)
-- **Walk Budget card** (from `state.budget`, see `crew/README.md`): big status word (GO / CAUTION / RETURN NOW), minutes of suit time left, minutes needed to walk home (with 20% margin), "turn-back in X min", visibility km.
+- **Walk Budget card** (from `derived.budget`, see `crew/README.md`): big status word (GO / CAUTION / RETURN NOW), minutes of suit time left, minutes needed to walk home (with 20% margin), "turn-back in X min", visibility km.
 - **Alerts list**: `budget.factors` sorted RED → AMBER → GREEN. Each row: icon, message, and a small "NASA data" or "Estimate" tag. Clicking a row opens the sources modal at that constant.
 - **Controls** (for judges to play): sol since landing slider (0–60), LTST slider (6–19), dust τ slider (0.2–5), "Solar storm" toggle, "Vision changes (SANS)" toggle, route mode (shortest / safest / keep home in sight).
 - **"How we know" modal**: table of every row in `data/crew_constants.json` — label, value, unit, NASA data / estimate, source link. This is our Validity proof — make it look good.
 - **Skyline Fix** button → opens the panel from `skyline/`.
 
 ## Demo player (map/scenario.js)
-Plays `data/scenario_demo.json`:
+Plays `data/scenario_demo.json` using the deterministic `stateAt(scenario, t, data)` (ARCHITECTURE.md §6) — the player only sets `scenarioT`; positions/events are rebuilt from `t`, so scrubbing works both ways:
 - Clock: 1 real second = 2 EVA minutes (configurable). Play / pause / scrub / restart.
 - Moves the astronaut along `state.route.points` at the walk speed from the budget.
-- Applies events at `tMin`: `tau` → `setState({tau})`; `sep_onset` → `setState({sepActive:true})` and show a full-width red banner "Solar particle event — replay of May 2024 storm measured by Curiosity. Return to shelter."; `skyline_fix` → open Skyline Fix panel with that site's result; `eva_end` → stop.
-- On `sep_onset` the route planner is re-run with target = home, mode = `safest`, so the new route home appears.
-- Each tick: `setState({evaMin, ltst: startLtst + evaMin / 61.65, astronaut})` (one Mars "hour" = 1/24 sol = 61.65 Earth minutes) then `computeBudget` re-runs (crew module subscribes).
+- Event effects (inside `stateAt`): `tau` → `tau`; `sep_onset` → `sepActive: true` and show a full-width red banner "Solar particle event — replay of May 2024 storm measured by Curiosity. Return to shelter."; `skyline_fix` → open Skyline Fix panel with that site's result; `eva_end` → stop.
+- On `sep_onset` the return leg (position at that moment → home, mode `safest`) is planned once and cached, so the new route home appears.
+- Each frame: `setInputs(stateAt(scenario, t, data))` → includes `evaMin = t`, `ltst = startLtst + t / 61.65` (one Mars "hour" = 61.65 Earth minutes), `astronaut`, `distSinceFixM`. The pipeline re-derives the budget — nothing subscribes and writes back.
 - A "Video mode" key (`v`) hides controls for clean screen recording.
 
 ## Acceptance checklist
-- [ ] Map loads CTX + HiRISE tiles at Jezero, EPSG4326, no console errors.
+- [ ] Map loads CTX + HiRISE tiles at Jezero, EPSG4326, no console errors; `data/basemap.png` underneath as offline fallback.
+- [ ] MOCK DATA badge visible whenever any mock is loaded.
+- [ ] No renderer writes state; scrubbing the timeline backwards gives the same screen as forwards.
 - [ ] Home, landmarks, targets, real Perseverance traverse visible.
 - [ ] Blind-zone overlay grows when τ slider goes up; stat line updates.
 - [ ] Walk Budget card + alerts update live from the sliders.
@@ -421,28 +685,28 @@ This is the "very complex, very detailed, one simple purpose" part. Every factor
 
 ## Files to create
 ```
-/crew/constants.js     loads data/crew_constants.json → object keyed by `key` (C.surface_dose_msv_per_sol.value ...)
-/crew/budget.js        export function computeBudget(input, C) → budget object (pure function, no DOM)
-/crew/budget.test.html open in browser: runs console.assert checks on computeBudget with fixed inputs
-/crew/wire.js          subscribe(store) → computes budget on every state change → setState({budget})
+/crew/budget.js        export function computeLimits(inputs, C) and computeBudget(inputs, limits, routeHomeKm, C) — pure, no DOM, no fetch
+/crew/budget.test.html open in browser: runs console.assert checks with fixed inputs, shows PASS/FAIL list
 ```
-`budget.js` must be a **pure function** (same input → same output, no fetch, no DOM). That makes it testable and lets the helmet and map share it.
+**No wiring file.** `lib/pipeline.js` (Brayden) calls your two functions in this order (ARCHITECTURE.md §5):
+`computeLimits` → visibility → route planner → `computeBudget`. This order breaks the circle "budget needs route length / route needs budget's slope limit". **Never subscribe to the store or call `setInputs` from crew code.**
 
-## Input (built from the store state + route)
-```js
-{
-  sol: 12,                // sols since landing
-  ltst: 10.5,             // local true solar time (h)
-  evaMin: 95,             // minutes since EVA start
-  routeHomeKm: 2.4,       // length of the current route back home (from route/route.js; straight-line × 1.3 if no route yet)
-  routeMaxSlopeDeg: 8,    // steepest slope on the way home
-  tau: 0.5,               // dust optical depth
-  sepActive: false,       // solar particle event
-  pressurePa: 718,        // MEDA pressure
-  tempC: -40,
-  sansAffected: true
-}
-```
+`C` = constants keyed by `key`: build it with
+`const C = Object.fromEntries(rows.map(r => [r.key, r.value]))` (the pipeline passes it in; keep `rows` around only for the UI tags).
+
+## `computeLimits(inputs, C)` → `{ speedKmh, maxSlopeDeg, visibilityKm }`
+Needs no route. Implements factor 1 (speed + slope limit, flat-ground speed — no slope factor here) and factor 4 (visibility). The route planner and the blind-zone map use this.
+
+## `computeBudget(inputs, limits, routeHomeKm, C)` → budget object
+`inputs` = the store inputs (ARCHITECTURE.md §4): `sol, ltst, evaMin, tau, sepActive, pressurePa, tempC, sansAffected, ...`.
+`routeHomeKm` = remaining length of the route home, given by the pipeline (it already includes slope effects through the route's travel time; if the route failed, the pipeline passes straight-line × 1.3 and adds a warning).
+`limits` = output of `computeLimits` (copy its fields into the budget output).
+
+### Required constant keys
+`computeLimits`/`computeBudget` must throw a clear error at load if any key is missing (the loader checks this list too):
+`walk_speed_kmh, walkback_pad, arrival_speed_factor_sol0, sensorimotor_recovery_days, max_slope_early_deg, max_slope_deg, eva_design_hours, eva_reserve_min, cruise_dose_msv_per_day, transit_days, surface_dose_msv_per_sol, career_limit_msv, may2024_sep_dose_ugy, terrain_shielding_pct, vis_dust_scale_height_km, sans_range_factor, tau_amber, tau_red, tau_jan2022_storm, dust_devil_peak_start_ltst, dust_devil_peak_end_ltst, dust_devil_max_wind_ms, mars_wind_earth_equiv_ms, sublimator_max_pressure_pa, cold_amber_c, cold_return_ltst, sans_diopter_shift, sol_drift_min, bone_loss_pct_per_month, perchlorate_pct`
+
+Export it: `export const REQUIRED_KEYS = [...]`.
 
 ## Output
 ```js
@@ -473,7 +737,7 @@ All numbers come from `C` (crew_constants.json). Names below are the `key`s.
 ### 1. Walking speed (base for everything)
 - `speed = walk_speed_kmh` (3.3 km/h, Apollo walk-back planning number — estimate for Mars).
 - **Arrival weakness:** sensorimotor problems last about `sensorimotor_recovery_days` (7). Factor ramps linearly from `arrival_speed_factor_sol0` (0.6, estimate) on sol 0 to 1.0 on sol 7.
-- **Slope:** multiply by a Tobler hiking factor for the steepest leg: `exp(-3.5 * |tan(slope) + 0.05|) / exp(-0.175)` (Earth hiking function — estimate).
+- **Slope:** not applied here — the route planner applies the Tobler hiking factor per step, so the route length/time already carries it. `computeBudget` uses `routeHomeKm` at the flat speed (keep it simple; note it in the factor message).
 - `maxSlopeDeg` = `max_slope_early_deg` (10) before sol 7, else `max_slope_deg` (15). Both estimates. Route planner forbids steeper cells.
 
 ### 2. Suit time (the hard clock)
@@ -562,7 +826,7 @@ Three modes:
 
 ## Files to create
 ```
-/route/route.js        export function planRoute(grid, bounds, viewsheds, start, goal, opts) → route object
+/route/route.js        export function planRoute(grid, bounds, vis, start, goal, opts) → route object
 /route/heap.js         tiny binary min-heap for A* (or inline in route.js)
 /route/route.test.html browser test page with console.assert checks + PASS/FAIL list
 ```
@@ -570,9 +834,10 @@ Three modes:
 ## Inputs
 - `grid` = `data/heightgrid.json` (399 × 378, 80 m cells; row 0 north). Use `lib/geo.js` helpers.
 - `bounds` = `meta.bounds`.
-- `viewsheds` = `{ blind: Uint8Array(w*h), homeHidden: Uint8Array(w*h) }` — 1 = blind / home hidden. Built by `map/visibility.js` from the viewshed PNGs (Brayden exports a function `getVisibilityArrays()`; until then build a mock with all zeros).
+- `vis` = `{ blind: Uint8Array(w*h), homeHidden: Uint8Array(w*h), w, h }` — 1 = blind / home hidden. From `visibilityArrays(visKm)` in `map/visibility.js` (the pipeline passes it in). Tests: build one with all zeros. **Assert `vis.w === grid.w && vis.h === grid.h`**, else return `{ok:false, reason:'visibility grid size mismatch'}`.
 - `start`, `goal` = `{lat, lon}`.
-- `opts` = `{ mode, maxSlopeDeg, speedKmh }` — `maxSlopeDeg` and `speedKmh` come from the Walk Budget (`budget.maxSlopeDeg`, `budget.speedKmh`).
+- `opts` = `{ mode, maxSlopeDeg, speedKmh, maxExpansions = 400000 }` — `maxSlopeDeg` and `speedKmh` come from `computeLimits()` (crew), **not** from the budget (that would be circular — ARCHITECTURE.md §5).
+- Signature is fixed: `planRoute(grid, bounds, vis, start, goal, opts)`. Pure function, **never throws** — any failure returns `{ ok:false, reason }`. Start/goal outside the grid → `{ok:false, reason:'outside map'}`. Start cell itself too steep/blocked → start from the nearest allowed cell.
 
 ## Algorithm (A* on the grid)
 - Nodes = grid cells; 8 neighbours.
@@ -596,7 +861,7 @@ If no path: `{ ok: false, reason: 'All paths exceed 10° slope limit (sol 3 crew
 
 ## How it's used
 - Map click in Plan mode → `planRoute(start = astronaut, goal = clicked point)`. Draw `safest` solid and `shortest` dashed so judges see the trade-off ("+6 min, but home stays in sight 85% of the way").
-- **Route home** is re-planned automatically when: the solar storm starts, budget turns RED, or τ changes the blind zones. Its `lengthKm` feeds `computeBudget` as `routeHomeKm`.
+- **When routes are re-planned is decided by `lib/pipeline.js`, not by route code** (route key: mode | target | maxSlope | visibility km | storm | every 10 EVA min — ARCHITECTURE.md §5). The pipeline turns `routeHome` into `routeHomeKm` for `computeBudget`. Route code never touches the store.
 - Edward's helmet view walks along `points`.
 - Save the demo route to `data/route_demo.json` (same shape) so the helmet view can use it standalone.
 
@@ -697,6 +962,9 @@ https://atmos.nmsu.edu/PDS/data/PDS4/Mars2020/mars2020_meda/data_derived_env/sol
 ```
 Columns: `SCLK, LMST, LTST, PRESSURE, ...`. Browse the same sol folder for the air-temperature product (file name contains `ATS`) — verify the name before scripting. Output `data/meda_sol.json`: `[{ltst, pressurePa, tempC}]` for one sol → the demo player can use real pressure/temperature by time of day.
 
+## Gate
+Run `python3 scripts/check_data.py` after every data change. It checks every contract (ARCHITECTURE.md §7) and fails on missing files, NaN, wrong sizes, swapped lat/lon, duplicate ids, and constants marked NASA data without a source.
+
 ## Acceptance checklist
 - [ ] Challenge Resources tab checked, used resources listed word for word.
 - [ ] All files in root README section 6 exist with the right shape.
@@ -733,9 +1001,11 @@ mkdir -p raw && curl -L -o raw/dtm.tif "https://asc-pds-services.s3.us-west-2.am
 
 ## Scripts to write
 
-### 1. `scripts/make_grid.py` → `data/meta.json`, `data/heightgrid.json`, `data/heightmap.png` (Sean — FIRST, others are waiting)
+### 1. `scripts/make_grid.py` → `data/meta.json`, `data/heightgrid.json`, `data/heightmap.png`, `data/basemap.png` (Sean — FIRST, others are waiting)
 - Downsample ×4 by block mean (ignore NaN) → 399 × 378 (crop the extra rows/cols: 1596/4 = 399, 1512/4 = 378).
+- **Fill no-data (NaN) with the nearest valid value first** (`scipy`-free: repeat a 3×3 nan-mean fill until none left). `json.dump` would otherwise write `NaN`, which is invalid JSON.
 - Write `heightgrid.json` exactly as root README section 6 (values rounded to 0.1 m, row 0 = north).
+- Write `basemap.png`: hillshade of the full 20 m DTM (sun azimuth 315°, altitude 30°), grayscale, 1596 × 1512 — offline fallback under the map tiles.
 - Write `heightmap.png` 8-bit grayscale scaled min→0, max→255.
 - Write `meta.json` exactly as root README.
 - Print min/max and the height at home (expect ≈ −2567 m).
@@ -758,6 +1028,13 @@ For each landmark: for every cell of the 399 × 378 working grid, is the landmar
 - Reference prototype logic (from our research session): horizon + LOS with curvature on the same DTM.
 
 ### 4. `scripts/skyline.py` → `data/skyline/<site>.json` (Brayden + Sean) — see `skyline/README.md` for the full spec
+
+### 6. `scripts/check_data.py` — the gate (already written)
+Validates every contract in ARCHITECTURE.md §7. Run before every push of data and before submitting:
+```bash
+python3 scripts/check_data.py
+```
+Exit code 0 = all good. It lists every problem otherwise.
 
 ### 5. `scripts/fetch_nasa.py` → `data/traverse.json`, `data/targets.json`, `data/donki_sep_may2024.json` (Sean) — see `data/README.md`
 
@@ -916,14 +1193,22 @@ Optional texture: a CTX tile image draped on the mesh — stretch only.
 - **Landmarks:** small labelled markers from `../data/landmarks.json`; hide those beyond `visibilityKm`.
 - **HUD** (HTML overlay on top of the canvas, not 3D text — easier to read): status word + colour (GO / CAUTION / RETURN NOW), suit minutes left, minutes to home, dust τ and visibility km, position uncertainty ± m, distance + bearing home. Big readable mono font. No NASA logos.
 
-## Live state from the main app
+## Live state from the main app (protocol: ARCHITECTURE.md §9)
 ```js
+// on load, tell the parent you're ready (only when inside an iframe)
+if (window.parent !== window) window.parent.postMessage({ type: 'sightline:hello', v: 1 }, location.origin);
+
 window.addEventListener('message', (e) => {
-  if (e.data?.type !== 'sightline:state') return;
-  const s = e.data.state;   // shape: root README section 7 (+ s.budget from crew/README.md)
-  // move camera to s.astronaut (unless the user is walking manually), update HUD, fog, route, beacon label
+  // security: same origin, from our parent, known type only
+  if (e.origin !== location.origin || e.source !== window.parent) return;
+  const m = e.data;
+  if (!m || m.type !== 'sightline:state' || m.v !== 1) return;
+  const { inputs, derived } = m;   // inputs: ARCHITECTURE §4; derived: { limits, budget, routeHome, posUncertaintyM }
+  // camera → inputs.astronaut (unless user is walking manually); fog far → derived.limits.visibilityKm*1000;
+  // HUD ← derived.budget; route line ← derived.routeHome.points; beacon label ← distance/bearing to meta.home
 });
 ```
+Never use `innerHTML` for HUD text — `textContent` only.
 Standalone mode: read query params `?lat=&lon=&tau=&status=` with sensible defaults (home, τ 0.4, GREEN), so the page works alone for Edward's testing.
 
 ## Walk-along mode
@@ -996,6 +1281,7 @@ Indonesian voice is OK **with English subtitles**. No NASA logos. No one under 1
 
 ## Final checklist (Sunday)
 - [ ] 16:00 feature freeze
+- [ ] `python3 scripts/check_data.py` exits 0 (no missing files, no mocks, no unsourced "NASA data" constants)
 - [ ] GitHub Pages live, loads in incognito, no console errors
 - [ ] Repo **public** (judges must open it without logging in)
 - [ ] Video ≤ 30 s, English subtitles, uploaded, link works in incognito

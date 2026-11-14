@@ -3,7 +3,7 @@
 **NASA Space Apps Challenge 2026 · Jakarta · Challenge: "Interplanetary Survival Guide: Martian Map" (Jezero Crater)**
 Team: Brayden, Jojo, Sean, Edward
 
-> **How to use this file with Claude:** paste this README **plus** the README of your feature folder into Claude (or open the repo in Claude Code — it reads `CLAUDE.md`). This file is the shared truth: concept, data formats, file layout, rules. Your feature file is the detailed build spec. If the two disagree, this file wins — tell the team.
+> **How to use this file with Claude:** paste `CONTEXT_BUNDLE.md` (everything in one file) into Claude, or open the repo in Claude Code — it reads `CLAUDE.md`. This README = concept, data formats, file layout, rules. **`ARCHITECTURE.md` = how the system fits together (state, pipeline, function signatures, failure handling, security).** Your feature README = the detailed build spec. Priority if they disagree: ARCHITECTURE.md → README.md → feature README. Tell the team.
 
 ---
 
@@ -145,6 +145,11 @@ All files live in `data/`. Sean (and `scripts/`) produce them. Everyone else rea
   "data": [ -2567.2, -2566.9, "... w*h numbers, metres, row-major, row 0 = north, 1 decimal" ] }
 ```
 
+**No NaN / null allowed** — fill DTM no-data with the nearest valid value before writing (Python writes `NaN`, which is invalid JSON and kills the app).
+
+### `data/basemap.png`
+Hillshade image of the DTM (full working-grid extent, ≥ 1596 × 1512 px, grayscale). Drawn under the Mars Trek tiles as an offline fallback if the tile server is slow during judging.
+
 ### `data/heightmap.png`
 Same grid as an 8-bit grayscale PNG (399 × 378). Pixel value v → elevation = min + v/255 × (max − min). For quick visuals only; use `heightgrid.json` for maths.
 
@@ -196,6 +201,8 @@ Raw response of the NASA DONKI SEP API for May 2024 (see `data/README.md`).
 }
 ```
 
+**Coordinate order everywhere in our files and functions: `[lat, lon]` or `{lat, lon}`.** GeoJSON's `[lon, lat]` is converted inside `scripts/fetch_nasa.py` only.
+
 ### `route.json` / route object (produced by `route/route.js`)
 ```json
 { "mode": "safest", "points": [[18.4447, 77.4508], [18.45, 77.44]], "lengthKm": 3.2,
@@ -207,31 +214,13 @@ See `skyline/README.md`.
 
 ---
 
-## 7. Shared app state (`lib/store.js`)
+## 7. Shared app state — see `ARCHITECTURE.md` §4–§5
 
-One state object. Anyone can read, set and subscribe. Brayden writes it in the first hour:
-```js
-// Written with AI assistance
-const state = {
-  sol: 12,                 // sols since landing
-  ltst: 9.0,               // local true solar time, hours (0-24)
-  evaMin: 0,               // minutes since EVA start
-  astronaut: { lat: 18.4447, lon: 77.4508, headingDeg: 0 },
-  posUncertaintyM: 30,     // radius of the uncertainty circle
-  tau: 0.4,                // dust optical depth
-  sepActive: false,        // solar particle event in progress
-  pressurePa: 718,         // MEDA surface pressure
-  tempC: -40,              // air temperature
-  sansAffected: true,      // crew member has spaceflight vision changes
-  route: null,             // route object (section 6)
-  budget: null             // output of crew/budget.js computeBudget()
-};
-const subs = new Set();
-export function getState() { return state; }
-export function setState(patch) { Object.assign(state, patch); subs.forEach(f => f(state)); }
-export function subscribe(fn) { subs.add(fn); fn(state); return () => subs.delete(fn); }
-```
-Main app → helmet iframe: `iframe.contentWindow.postMessage({ type: 'sightline:state', state }, '*')` on every change.
+Summary (the full contract, function signatures and rules live in ARCHITECTURE.md):
+- `lib/store.js` holds `{ data, inputs, derived }`. **Only `setInputs(patch)` changes state**; it runs the pipeline and notifies subscribers once.
+- `lib/pipeline.js` computes, in this fixed order: `computeLimits` → visibility → `planRoute` (home + target) → `computeBudget`.
+- Renderers `subscribe()` and **only read**. Calling `setInputs` inside a subscriber throws.
+- Main app ↔ helmet iframe: same-origin `postMessage` with a `hello` handshake and versioned messages (ARCHITECTURE §9).
 
 ---
 

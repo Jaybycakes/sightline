@@ -48,6 +48,7 @@ Indonesian voice is OK **with English subtitles**. No NASA logos. No one under 1
 
 ## Final checklist (Sunday)
 - [ ] 16:00 feature freeze
+- [ ] `python3 scripts/check_data.py` exits 0 (no missing files, no mocks, no unsourced "NASA data" constants)
 - [ ] GitHub Pages live, loads in incognito, no console errors
 - [ ] Repo **public** (judges must open it without logging in)
 - [ ] Video ≤ 30 s, English subtitles, uploaded, link works in incognito

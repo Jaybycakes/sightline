@@ -9,28 +9,28 @@ This is the "very complex, very detailed, one simple purpose" part. Every factor
 
 ## Files to create
 ```
-/crew/constants.js     loads data/crew_constants.json → object keyed by `key` (C.surface_dose_msv_per_sol.value ...)
-/crew/budget.js        export function computeBudget(input, C) → budget object (pure function, no DOM)
-/crew/budget.test.html open in browser: runs console.assert checks on computeBudget with fixed inputs
-/crew/wire.js          subscribe(store) → computes budget on every state change → setState({budget})
+/crew/budget.js        export function computeLimits(inputs, C) and computeBudget(inputs, limits, routeHomeKm, C) — pure, no DOM, no fetch
+/crew/budget.test.html open in browser: runs console.assert checks with fixed inputs, shows PASS/FAIL list
 ```
-`budget.js` must be a **pure function** (same input → same output, no fetch, no DOM). That makes it testable and lets the helmet and map share it.
+**No wiring file.** `lib/pipeline.js` (Brayden) calls your two functions in this order (ARCHITECTURE.md §5):
+`computeLimits` → visibility → route planner → `computeBudget`. This order breaks the circle "budget needs route length / route needs budget's slope limit". **Never subscribe to the store or call `setInputs` from crew code.**
 
-## Input (built from the store state + route)
-```js
-{
-  sol: 12,                // sols since landing
-  ltst: 10.5,             // local true solar time (h)
-  evaMin: 95,             // minutes since EVA start
-  routeHomeKm: 2.4,       // length of the current route back home (from route/route.js; straight-line × 1.3 if no route yet)
-  routeMaxSlopeDeg: 8,    // steepest slope on the way home
-  tau: 0.5,               // dust optical depth
-  sepActive: false,       // solar particle event
-  pressurePa: 718,        // MEDA pressure
-  tempC: -40,
-  sansAffected: true
-}
-```
+`C` = constants keyed by `key`: build it with
+`const C = Object.fromEntries(rows.map(r => [r.key, r.value]))` (the pipeline passes it in; keep `rows` around only for the UI tags).
+
+## `computeLimits(inputs, C)` → `{ speedKmh, maxSlopeDeg, visibilityKm }`
+Needs no route. Implements factor 1 (speed + slope limit, flat-ground speed — no slope factor here) and factor 4 (visibility). The route planner and the blind-zone map use this.
+
+## `computeBudget(inputs, limits, routeHomeKm, C)` → budget object
+`inputs` = the store inputs (ARCHITECTURE.md §4): `sol, ltst, evaMin, tau, sepActive, pressurePa, tempC, sansAffected, ...`.
+`routeHomeKm` = remaining length of the route home, given by the pipeline (it already includes slope effects through the route's travel time; if the route failed, the pipeline passes straight-line × 1.3 and adds a warning).
+`limits` = output of `computeLimits` (copy its fields into the budget output).
+
+### Required constant keys
+`computeLimits`/`computeBudget` must throw a clear error at load if any key is missing (the loader checks this list too):
+`walk_speed_kmh, walkback_pad, arrival_speed_factor_sol0, sensorimotor_recovery_days, max_slope_early_deg, max_slope_deg, eva_design_hours, eva_reserve_min, cruise_dose_msv_per_day, transit_days, surface_dose_msv_per_sol, career_limit_msv, may2024_sep_dose_ugy, terrain_shielding_pct, vis_dust_scale_height_km, sans_range_factor, tau_amber, tau_red, tau_jan2022_storm, dust_devil_peak_start_ltst, dust_devil_peak_end_ltst, dust_devil_max_wind_ms, mars_wind_earth_equiv_ms, sublimator_max_pressure_pa, cold_amber_c, cold_return_ltst, sans_diopter_shift, sol_drift_min, bone_loss_pct_per_month, perchlorate_pct`
+
+Export it: `export const REQUIRED_KEYS = [...]`.
 
 ## Output
 ```js
@@ -61,7 +61,7 @@ All numbers come from `C` (crew_constants.json). Names below are the `key`s.
 ### 1. Walking speed (base for everything)
 - `speed = walk_speed_kmh` (3.3 km/h, Apollo walk-back planning number — estimate for Mars).
 - **Arrival weakness:** sensorimotor problems last about `sensorimotor_recovery_days` (7). Factor ramps linearly from `arrival_speed_factor_sol0` (0.6, estimate) on sol 0 to 1.0 on sol 7.
-- **Slope:** multiply by a Tobler hiking factor for the steepest leg: `exp(-3.5 * |tan(slope) + 0.05|) / exp(-0.175)` (Earth hiking function — estimate).
+- **Slope:** not applied here — the route planner applies the Tobler hiking factor per step, so the route length/time already carries it. `computeBudget` uses `routeHomeKm` at the flat speed (keep it simple; note it in the factor message).
 - `maxSlopeDeg` = `max_slope_early_deg` (10) before sol 7, else `max_slope_deg` (15). Both estimates. Route planner forbids steeper cells.
 
 ### 2. Suit time (the hard clock)

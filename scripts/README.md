@@ -24,9 +24,11 @@ mkdir -p raw && curl -L -o raw/dtm.tif "https://asc-pds-services.s3.us-west-2.am
 
 ## Scripts to write
 
-### 1. `scripts/make_grid.py` → `data/meta.json`, `data/heightgrid.json`, `data/heightmap.png` (Sean — FIRST, others are waiting)
+### 1. `scripts/make_grid.py` → `data/meta.json`, `data/heightgrid.json`, `data/heightmap.png`, `data/basemap.png` (Sean — FIRST, others are waiting)
 - Downsample ×4 by block mean (ignore NaN) → 399 × 378 (crop the extra rows/cols: 1596/4 = 399, 1512/4 = 378).
+- **Fill no-data (NaN) with the nearest valid value first** (`scipy`-free: repeat a 3×3 nan-mean fill until none left). `json.dump` would otherwise write `NaN`, which is invalid JSON.
 - Write `heightgrid.json` exactly as root README section 6 (values rounded to 0.1 m, row 0 = north).
+- Write `basemap.png`: hillshade of the full 20 m DTM (sun azimuth 315°, altitude 30°), grayscale, 1596 × 1512 — offline fallback under the map tiles.
 - Write `heightmap.png` 8-bit grayscale scaled min→0, max→255.
 - Write `meta.json` exactly as root README.
 - Print min/max and the height at home (expect ≈ −2567 m).
@@ -49,6 +51,13 @@ For each landmark: for every cell of the 399 × 378 working grid, is the landmar
 - Reference prototype logic (from our research session): horizon + LOS with curvature on the same DTM.
 
 ### 4. `scripts/skyline.py` → `data/skyline/<site>.json` (Brayden + Sean) — see `skyline/README.md` for the full spec
+
+### 6. `scripts/check_data.py` — the gate (already written)
+Validates every contract in ARCHITECTURE.md §7. Run before every push of data and before submitting:
+```bash
+python3 scripts/check_data.py
+```
+Exit code 0 = all good. It lists every problem otherwise.
 
 ### 5. `scripts/fetch_nasa.py` → `data/traverse.json`, `data/targets.json`, `data/donki_sep_may2024.json` (Sean) — see `data/README.md`
 

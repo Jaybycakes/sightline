@@ -54,14 +54,22 @@ Optional texture: a CTX tile image draped on the mesh — stretch only.
 - **Landmarks:** small labelled markers from `../data/landmarks.json`; hide those beyond `visibilityKm`.
 - **HUD** (HTML overlay on top of the canvas, not 3D text — easier to read): status word + colour (GO / CAUTION / RETURN NOW), suit minutes left, minutes to home, dust τ and visibility km, position uncertainty ± m, distance + bearing home. Big readable mono font. No NASA logos.
 
-## Live state from the main app
+## Live state from the main app (protocol: ARCHITECTURE.md §9)
 ```js
+// on load, tell the parent you're ready (only when inside an iframe)
+if (window.parent !== window) window.parent.postMessage({ type: 'sightline:hello', v: 1 }, location.origin);
+
 window.addEventListener('message', (e) => {
-  if (e.data?.type !== 'sightline:state') return;
-  const s = e.data.state;   // shape: root README section 7 (+ s.budget from crew/README.md)
-  // move camera to s.astronaut (unless the user is walking manually), update HUD, fog, route, beacon label
+  // security: same origin, from our parent, known type only
+  if (e.origin !== location.origin || e.source !== window.parent) return;
+  const m = e.data;
+  if (!m || m.type !== 'sightline:state' || m.v !== 1) return;
+  const { inputs, derived } = m;   // inputs: ARCHITECTURE §4; derived: { limits, budget, routeHome, posUncertaintyM }
+  // camera → inputs.astronaut (unless user is walking manually); fog far → derived.limits.visibilityKm*1000;
+  // HUD ← derived.budget; route line ← derived.routeHome.points; beacon label ← distance/bearing to meta.home
 });
 ```
+Never use `innerHTML` for HUD text — `textContent` only.
 Standalone mode: read query params `?lat=&lon=&tau=&status=` with sensible defaults (home, τ 0.4, GREEN), so the page works alone for Edward's testing.
 
 ## Walk-along mode
