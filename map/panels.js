@@ -1,5 +1,6 @@
 // Written with AI assistance (Claude / GitHub Copilot)
-// Side panels: walk budget, alerts, controls, clock, banner, sources modal, data badge.
+// Side panels: answer card, crew/visibility/position cards, alerts, controls, clock, banner,
+// timeline checkpoints, sources modal, data badge.
 // Renders from the store; control events call setInputs (user actions, never inside render).
 
 const $ = id => document.getElementById(id);
@@ -15,7 +16,52 @@ const fmtLtst = h => {
   const t = ((h % 24) + 24) % 24;
   return `${String(Math.floor(t)).padStart(2, '0')}:${String(Math.floor((t % 1) * 60)).padStart(2, '0')}`;
 };
-const fmtMin = m => (m >= 60 ? `${Math.floor(m / 60)} h ${Math.round(m % 60)} min` : `${Math.round(m)} min`);
+const fmtMin = m => {
+  if (!Number.isFinite(m)) return '–';
+  return m >= 60 ? `${Math.floor(m / 60)} h ${Math.round(m % 60)} min` : `${Math.round(m)} min`;
+};
+const fmtNum = (v, digits = 0, unit = '') => (Number.isFinite(v) ? `${v.toFixed(digits)}${unit}` : '–');
+const fmtM = v => (Number.isFinite(v) ? `${Math.round(v)} m` : '–');
+const fmtKm = v => (Number.isFinite(v) ? `${v.toFixed(v < 10 ? 1 : 0)} km` : '–');
+
+// Crew card = factors that are not about dust, visibility or position; if none match, the 3 most severe.
+const NOT_CREW = /dust|vis|pos|fix|sky|landmark/i;
+const SEVERITY = { RED: 0, AMBER: 1, GREEN: 2 };
+function crewFactors(factors) {
+  const bySeverity = [...factors].sort((a, b) => SEVERITY[a.level] - SEVERITY[b.level]);
+  const crew = bySeverity.filter(f => !NOT_CREW.test(f.id));
+  return (crew.length ? crew : bySeverity).slice(0, 3);
+}
+
+const EVENT_LABELS = { eva_start: 'EVA start', sep_onset: 'Solar storm', skyline_fix: 'Skyline fix', eva_end: 'EVA end' };
+const eventLabel = ev => (ev.type === 'tau' ? `Dust τ ${ev.value}` : EVENT_LABELS[ev.type] ?? ev.type);
+
+function buildTimeline(data) {
+  const events = data.scenario?.events ?? [];
+  if (!events.length) return [];
+  const end = events[events.length - 1].tMin;
+  const cps = events.map(ev => {
+    const cp = el('li', 'cp');
+    cp.style.left = `${end > 0 ? (ev.tMin / end) * 100 : 0}%`;
+    cp.append(el('span', 'cp-dot'), el('span', 'cp-label', eventLabel(ev)));
+    return { tMin: ev.tMin, cp };
+  });
+  $('t-track').replaceChildren(...cps.map(c => c.cp));
+  return cps;
+}
+
+function markCheckpoints(cps, t) {
+  let current = -1;
+  cps.forEach((c, i) => {
+    const passed = t !== null && c.tMin <= t;
+    c.cp.classList.toggle('passed', passed);
+    if (passed) current = i;
+  });
+  cps.forEach((c, i) => {
+    c.cp.classList.toggle('current', i === current);
+    if (i === current) c.cp.setAttribute('aria-current', 'step'); else c.cp.removeAttribute('aria-current');
+  });
+}
 
 function tagFor(keys, byKey) {
   const rows = keys.map(k => byKey[k]).filter(Boolean);
@@ -62,9 +108,23 @@ function dataBadge(data, usingStubs) {
   document.body.append(b);
 }
 
+function factorItem(f, byKey) {
+  const li = el('li', f.level);
+  li.dataset.key = f.keys?.[0] || '';
+  li.tabIndex = 0;
+  const text = el('div');
+  text.append(el('strong', '', f.label));
+  const tag = tagFor(f.keys || [], byKey);
+  if (tag) text.append(el('span', tag[1], tag[0]));
+  text.append(el('div', '', f.message));
+  li.append(el('span', 'dot'), text);
+  return li;
+}
+
 export function createPanels(data, { setInputs, usingStubs }) {
   buildSources(data);
   dataBadge(data, usingStubs);
+  const checkpoints = buildTimeline(data);
   $('btn-sources').addEventListener('click', () => openSources());
 
   const sliders = [
@@ -90,54 +150,70 @@ export function createPanels(data, { setInputs, usingStubs }) {
     if (li) { e.preventDefault(); openSources(li.dataset.key); }
   });
 
-  let lastFactorsSig = '';
-  return function render({ inputs, derived }) {
+  let lastFactorsSig = '', lastCrewSig = '';
+
+  function renderCrew(factors) {
+    const crew = crewFactors(factors);
+    const sig = crew.map(f => `${f.id}:${f.level}`).join('|');
+    if (sig === lastCrewSig) return;
+    lastCrewSig = sig;
+    $('crew-list').replaceChildren(...crew.map(f => {
+      const li = el('li', f.level);
+      li.append(el('span', 'dot'), el('span', '', f.label), el('span', 'lvl', f.level));
+      return li;
+    }));
+  }
+
+  function renderAlerts(bdg, derived) {
+    const sig = JSON.stringify(bdg.factors.map(f => [f.id, f.level, f.message])) + derived.warnings.join('|');
+    if (sig === lastFactorsSig) return;
+    lastFactorsSig = sig;
+    const items = bdg.factors.map(f => factorItem(f, data.constantsByKey));
+    for (const w of derived.warnings) {
+      const li = el('li', 'AMBER');
+      li.append(el('span', 'dot'), el('div', '', w));
+      items.push(li);
+    }
+    alerts.replaceChildren(...items);
+  }
+
+  function renderCards(inputs, derived) {
     const bdg = derived.budget;
+    const card = $('budget');
+    card.dataset.status = bdg.status;
+    $('b-headline').textContent = bdg.headline;
+    $('b-return').textContent = fmtMin(bdg.returnMin);
+    $('b-km').textContent = fmtKm(derived.routeHomeKm);
+    $('b-suit').textContent = fmtMin(Math.max(0, bdg.suitMinLeft));
+    $('b-turn').textContent = bdg.marginMin <= 0 ? 'now' : fmtMin(bdg.turnBackInMin);
+    $('b-speed').textContent = fmtNum(derived.limits.speedKmh, 1, ' km/h');
+    $('b-vis').textContent = fmtKm(derived.limits.visibilityKm);
+    $('b-tau').textContent = fmtNum(inputs.tau, 1);
+    const pct = derived.vis.homeVisiblePct3km;
+    $('vis-stat').textContent = Number.isFinite(pct) ? `Home visible from ${Math.round(pct)}% of ground within 3 km` : '–';
+    const posM = derived.posUncertaintyM;
+    $('b-pos').textContent = Number.isFinite(posM) ? `± ${Math.round(posM)} m` : '–';
+    $('b-fix').textContent = Number.isFinite(inputs.distSinceFixM) ? `${fmtM(inputs.distSinceFixM)} ago` : '–';
+    $('b-acc').textContent = Number.isFinite(inputs.fixUncertaintyM) ? `± ${Math.round(inputs.fixUncertaintyM)} m` : '–';
+  }
+
+  return function render({ inputs, derived }) {
     const scenarioOn = inputs.scenarioT !== null;
 
     $('clk-sol').textContent = inputs.sol;
     $('clk-ltst').textContent = fmtLtst(inputs.ltst);
     $('clk-eva').textContent = `${Math.round(inputs.evaMin)} min`;
 
-    const card = $('budget');
-    card.dataset.status = bdg.status;
-    $('b-headline').textContent = bdg.headline;
-    $('b-suit').textContent = fmtMin(Math.max(0, bdg.suitMinLeft));
-    $('b-return').textContent = `${fmtMin(bdg.returnMin)} · ${derived.routeHomeKm.toFixed(1)} km`;
-    $('b-turn').textContent = bdg.marginMin <= 0 ? 'now' : fmtMin(bdg.turnBackInMin);
-    $('b-vis').textContent = `${Math.round(derived.limits.visibilityKm)} km`;
-
-    const sig = JSON.stringify(bdg.factors.map(f => [f.id, f.level, f.message])) + derived.warnings.join('|');
-    if (sig !== lastFactorsSig) {
-      lastFactorsSig = sig;
-      const items = bdg.factors.map(f => {
-        const li = el('li', f.level);
-        li.dataset.key = f.keys?.[0] || '';
-        li.tabIndex = 0;
-        const text = el('div');
-        text.append(el('strong', '', f.label));
-        const tag = tagFor(f.keys || [], data.constantsByKey);
-        if (tag) text.append(el('span', tag[1], tag[0]));
-        text.append(el('div', '', f.message));
-        li.append(el('span', 'dot'), text);
-        return li;
-      });
-      for (const w of derived.warnings) {
-        const li = el('li', 'AMBER');
-        li.append(el('span', 'dot'), el('div', '', w));
-        items.push(li);
-      }
-      alerts.replaceChildren(...items);
-    }
+    renderCards(inputs, derived);
+    renderCrew(derived.budget.factors);
+    renderAlerts(derived.budget, derived);
+    markCheckpoints(checkpoints, inputs.scenarioT);
 
     const banner = $('banner');
     if (inputs.sepActive) {
       banner.textContent = `Solar particle event. Replay of the May 2024 storm, when Curiosity measured ${data.C.may2024_sep_dose_ugy.toLocaleString()} µGy at Mars. Return to shelter.`;
       banner.hidden = false;
     } else banner.hidden = true;
-
-    const pct = derived.vis.homeVisiblePct3km;
-    $('vis-stat').textContent = `Home visible from ${Math.round(pct)}% of ground within 3 km`;
 
     for (const [id, out, key, fmt] of sliders) {
       $(id).value = inputs[key];

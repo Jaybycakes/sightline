@@ -83,3 +83,5 @@ Run `python3 scripts/check_data.py` after every data change. It checks every con
 - [ ] All files in root README section 6 exist with the right shape.
 - [ ] `crew_constants.json` rows checked; TODOs resolved or clearly marked estimate.
 - [ ] `sources.md` complete enough to paste into the submission page.
+
+`terrain_texture.jpg` — CTX orthomosaic (NASA Mars Trek) cropped to the `meta.json` bounds, made by `scripts/make_texture.py`.

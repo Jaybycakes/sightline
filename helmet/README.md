@@ -7,16 +7,18 @@ Show what the astronaut sees: real Jezero terrain in first person, with a **home
 
 It must work **standalone** (`helmet/index.html` opened directly) and **inside the main app** (iframe receiving live state).
 
+## Scope (changed): overlays only
+The terrain is already built. `lib/terrain.js` (shared with the main app's 3D view) registers the A-Frame component `heightgrid-terrain`: real Jezero mesh from `data/heightgrid.json` with the CTX image `data/terrain_texture.jpg` draped on it. **Do not write your own terrain or edit `lib/terrain.js`** — you build what sits on top: beacon, HUD, walk mode.
+
 ## Files to create
 ```
-/helmet/index.html     A-Frame scene, loads helmet.js
-/helmet/terrain.js     A-Frame component: builds the terrain mesh from data/heightgrid.json
+/helmet/index.html     A-Frame scene, loads ../lib/terrain.js then helmet.js
 /helmet/helmet.js      beacon, route line, landmarks, HUD, walk-along mode, postMessage listener
 ```
-A-Frame from CDN: `<script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>`. No build step. Run from the repo root with `python3 -m http.server 8000` → http://localhost:8000/helmet/ (paths to data are `../data/...`).
+A-Frame from CDN: `<script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>`, then `<script src="../lib/terrain.js"></script>` (classic script, not a module). No build step. Run from the repo root with `python3 -m http.server 8000` → http://localhost:8000/helmet/ (paths to data are `../data/...`).
 
-## Start without waiting for Sean (mock data)
-Create `helmet/heightgrid.mock.json` with the same shape as `data/heightgrid.json` (e.g. 100 × 100, cellM 80, data = a few sine hills + a crater bowl). Load `../data/heightgrid.json` first; if it fails, load the mock. Same for `../data/meta.json` (mock: home at the grid centre).
+## Start now (real data is in the repo)
+Not needed any more: `data/heightgrid.json`, `data/meta.json` and `data/terrain_texture.jpg` are real and in the repo. Open `helmet/index.html` with the terrain entity above and start on the overlays.
 
 ## World coordinates
 - Origin (0,0,0) = **home** (meta.home), at home's ground height.
@@ -24,23 +26,20 @@ Create `helmet/heightgrid.mock.json` with the same shape as `data/heightgrid.jso
 - Lat/lon → x/z: `x = deg2rad(lon − home.lon) * cos(deg2rad(home.lat)) * R`, `z = −deg2rad(lat − home.lat) * R` (R = 3,396,190). Use `lib/geo.js` (`import { deg2rad, R } from '../lib/geo.js'`).
 - Vertical scale 1× (true). Optional `?exaggerate=2` for drama — label it on screen if used.
 
-## Terrain component (`terrain.js`)
-```js
-AFRAME.registerComponent('heightgrid-terrain', {
-  schema: { src: { type: 'string' } },
-  async init() {
-    // fetch grid; geometry = new THREE.PlaneGeometry(w*cellM_ew, h*cellM, w-1, h-1)
-    // geometry.rotateX(-Math.PI / 2) FIRST so it lies flat; plane row 0 (top) now points north (-z) ✔
-    // THEN for each vertex i: position.setY(i, grid.data[i] - homeElevation)  (vertex order = row-major, row 0 = north, col 0 = west)
-    // offset the mesh so home's cell sits at x=0,z=0
-    // geometry.computeVertexNormals(); material = MeshStandardMaterial({ color:'#b0623a', roughness:1, flatShading:true })
-    // this.el.setObject3D('mesh', mesh)
-  }
-});
+## Terrain component (`lib/terrain.js`, already written — use it, don't change it)
+```html
+<a-entity id="terrain" heightgrid-terrain="src: ../data/heightgrid.json; meta: ../data/meta.json; texture: ../data/terrain_texture.jpg"></a-entity>
 ```
-(`cellM_ew` = 80 × cos(home.lat) ≈ 76 m, `cellM` = 80 m.) 399 × 378 ≈ 150k vertices — fine on a laptop. If a phone struggles, sample every 2nd vertex.
-
-Optional texture: a CTX tile image draped on the mesh — stretch only.
+```js
+document.querySelector('#terrain').addEventListener('terrain-loaded', e => {
+  const terrain = e.detail;                 // the component instance
+  terrain.toWorld(lat, lon);                // → {x, y, z}, y = ground height there
+  terrain.heightAt(x, z);                   // → ground y (use it to glue the camera: y = heightAt(x, z) + 1.7)
+  terrain.sizeM;                            // {ew, ns} extent in metres
+});
+// 'terrain-error' (detail.message) fires if the grid cannot be loaded — show it in the HUD.
+```
+Schema: `src`, `meta`, `texture` (paths relative to the page), `step` (use `2` if a phone struggles: every 2nd vertex), `exaggerate` (vertical scale, default 1 — label it on screen if you change it). If the texture is missing the mesh falls back to a flat Mars colour. Use `toWorld` for every lat/lon you place (beacon, route points, landmarks) so the helmet and the main 3D view always agree.
 
 ## Scene
 - Sky: daytime Mars butterscotch `#c9a27e` → horizon `#e0c49a`; light: one directional "sun" + soft ambient.
@@ -76,7 +75,7 @@ Standalone mode: read query params `?lat=&lon=&tau=&status=` with sensible defau
 Button "Walk route": camera moves along `route.points` at ~1.3 m/s (or faster ×20 for the video), facing the direction of travel, with the HUD updating distance to home.
 
 ## Acceptance checklist
-- [ ] Real Jezero terrain renders (delta, rim visible) from `data/heightgrid.json`.
+- [ ] Real Jezero terrain renders (delta, rim visible) through `lib/terrain.js` — no terrain code in `helmet/`.
 - [ ] Camera starts at home at eye height, can look around (mouse + touch).
 - [ ] Beacon visible through terrain; label changes when hidden.
 - [ ] HUD arrow points home correctly (test: walk 1 km north → arrow points back/south).

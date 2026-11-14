@@ -88,3 +88,6 @@ Exit code 0 = all good. It lists every problem otherwise.
 - [ ] `landmarks.json` has home + ~12 landmarks.
 - [ ] One viewshed PNG per landmark; home stats printed and close to the prototype.
 - [ ] Skyline results for at least 3 sites.
+
+### 7. `scripts/make_texture.py` → `data/terrain_texture.jpg`
+Stitches the NASA Mars Trek CTX orthomosaic (WMTS, EPSG:4326, zoom 12, 182 tiles) and crops it exactly to `meta.json` bounds (left = lonMin, top = latMax) for use as the 3D terrain texture. 3137 × 2972 RGB JPEG, ~1.7 MB. Missing tiles are left black and reported. Run: `python3 scripts/make_texture.py` (needs Pillow).

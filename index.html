@@ -18,9 +18,9 @@
   <header class="topbar">
     <h1 class="brand">Sightline</h1>
     <dl class="clock" aria-live="off">
-      <div><dt>Sol</dt><dd id="clk-sol">12</dd></div>
-      <div><dt>LTST</dt><dd id="clk-ltst">09:00</dd></div>
-      <div><dt>EVA</dt><dd id="clk-eva">0 min</dd></div>
+      <div><dt>Sol</dt><dd id="clk-sol">–</dd></div>
+      <div><dt>LTST</dt><dd id="clk-ltst">–</dd></div>
+      <div><dt>EVA</dt><dd id="clk-eva">–</dd></div>
     </dl>
     <nav class="topnav" aria-label="Views">
       <button type="button" id="btn-skyline" class="btn">Skyline Fix</button>
@@ -34,25 +34,51 @@
   <main class="layout">
     <section class="map-wrap" aria-label="Jezero Crater map">
       <div id="map"></div>
+      <div id="view3d" class="view3d" hidden>
+        <p id="v3-note" class="v3-note"></p>
+        <p id="v3-msg" class="v3-msg" role="status" hidden></p>
+      </div>
+      <div class="view-toggle" role="group" aria-label="Map view">
+        <button type="button" id="v-2d" aria-pressed="true">2D map</button>
+        <button type="button" id="v-3d" aria-pressed="false">3D terrain</button>
+      </div>
       <div class="legend" id="legend">
         <span><i class="sw sw-red"></i>No landmark in sight</span>
         <span><i class="sw sw-amber"></i>Home hidden, landmark visible</span>
         <span><i class="sw sw-clear"></i>Home in sight</span>
-        <p id="vis-stat" class="stat"></p>
       </div>
     </section>
 
     <aside class="side" aria-label="Walk budget and controls">
-      <section class="card budget" id="budget" aria-live="polite">
-        <h2 id="b-headline" class="headline">GO</h2>
+      <section class="card budget" id="budget" data-status="GREEN" aria-live="polite">
+        <h2 id="b-headline" class="headline">–</h2>
         <p class="question">Can this astronaut still get home?</p>
-        <dl class="nums">
+        <p class="home"><span id="b-return" class="home-min">–</span><span class="home-unit">to walk home · <span id="b-km">–</span></span></p>
+        <dl class="mini">
           <div><dt>Suit time left</dt><dd id="b-suit">–</dd></div>
-          <div><dt>Walk home</dt><dd id="b-return">–</dd></div>
           <div><dt>Turn back in</dt><dd id="b-turn">–</dd></div>
-          <div><dt>Visibility</dt><dd id="b-vis">–</dd></div>
         </dl>
       </section>
+
+      <div class="trio">
+        <section class="card crew">
+          <h2>Crew</h2>
+          <ul id="crew-list" class="factors"></ul>
+          <p class="row"><span>Walking speed</span><span id="b-speed" class="mono">–</span></p>
+        </section>
+        <section class="card">
+          <h2>Visibility</h2>
+          <p class="big"><span id="b-vis">–</span></p>
+          <p class="row"><span>Dust τ</span><span id="b-tau" class="mono">–</span></p>
+          <p id="vis-stat" class="stat"></p>
+        </section>
+        <section class="card">
+          <h2>Position</h2>
+          <p class="big"><span id="b-pos">–</span></p>
+          <p class="row"><span>Last fix</span><span id="b-fix" class="mono">–</span></p>
+          <p class="row"><span>Fix accuracy</span><span id="b-acc" class="mono">–</span></p>
+        </section>
+      </div>
 
       <section class="card">
         <h2>Alerts</h2>
@@ -81,9 +107,14 @@
   </main>
 
   <footer class="timeline" id="timeline">
-    <button type="button" id="t-play" class="btn" aria-label="Play demo">Play demo</button>
-    <button type="button" id="t-reset" class="btn btn-ghost">Restart</button>
-    <input type="range" id="t-scrub" min="0" max="200" step="1" value="0" aria-label="Scenario time">
+    <div class="dock-ctl">
+      <button type="button" id="t-play" class="btn btn-accent" aria-label="Play demo">Play demo</button>
+      <button type="button" id="t-reset" class="btn btn-ghost">Restart</button>
+    </div>
+    <div class="scrub-wrap">
+      <input type="range" id="t-scrub" min="0" max="200" step="1" value="0" aria-label="Scenario time">
+      <ol id="t-track" class="track" aria-label="Scenario checkpoints"></ol>
+    </div>
     <span id="t-label" class="mono">t = 0 min</span>
   </footer>
 
