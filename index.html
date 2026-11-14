@@ -1,0 +1,100 @@
+<!doctype html>
+<!-- Written with AI assistance (Claude / GitHub Copilot) -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sightline — Mars navigation without GPS</title>
+  <meta name="description" content="Sightline answers one question on a Mars spacewalk in Jezero Crater: can this astronaut still find their way home safely? Built on NASA terrain, radiation and weather data.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" defer></script>
+  <script type="module" src="map/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <h1 class="brand">Sightline</h1>
+    <dl class="clock" aria-live="off">
+      <div><dt>Sol</dt><dd id="clk-sol">12</dd></div>
+      <div><dt>LTST</dt><dd id="clk-ltst">09:00</dd></div>
+      <div><dt>EVA</dt><dd id="clk-eva">0 min</dd></div>
+    </dl>
+    <nav class="topnav" aria-label="Views">
+      <button type="button" id="btn-skyline" class="btn">Skyline Fix</button>
+      <button type="button" id="btn-helmet" class="btn">Helmet view</button>
+      <button type="button" id="btn-sources" class="btn btn-ghost">How we know</button>
+    </nav>
+  </header>
+
+  <div id="banner" class="banner" role="alert" hidden></div>
+
+  <main class="layout">
+    <section class="map-wrap" aria-label="Jezero Crater map">
+      <div id="map"></div>
+      <div class="legend" id="legend">
+        <span><i class="sw sw-red"></i>No landmark in sight</span>
+        <span><i class="sw sw-amber"></i>Home hidden, landmark visible</span>
+        <span><i class="sw sw-clear"></i>Home in sight</span>
+        <p id="vis-stat" class="stat"></p>
+      </div>
+    </section>
+
+    <aside class="side" aria-label="Walk budget and controls">
+      <section class="card budget" id="budget" aria-live="polite">
+        <h2 id="b-headline" class="headline">GO</h2>
+        <p class="question">Can this astronaut still get home?</p>
+        <dl class="nums">
+          <div><dt>Suit time left</dt><dd id="b-suit">–</dd></div>
+          <div><dt>Walk home</dt><dd id="b-return">–</dd></div>
+          <div><dt>Turn back in</dt><dd id="b-turn">–</dd></div>
+          <div><dt>Visibility</dt><dd id="b-vis">–</dd></div>
+        </dl>
+      </section>
+
+      <section class="card">
+        <h2>Alerts</h2>
+        <ul id="alerts" class="alerts"></ul>
+      </section>
+
+      <section class="card controls" id="controls">
+        <h2>Conditions</h2>
+        <label>Sols since landing <output id="o-sol"></output>
+          <input type="range" id="c-sol" min="0" max="60" step="1"></label>
+        <label>Local solar time <output id="o-ltst"></output>
+          <input type="range" id="c-ltst" min="6" max="19" step="0.25"></label>
+        <label>Dust optical depth τ <output id="o-tau"></output>
+          <input type="range" id="c-tau" min="0.2" max="5" step="0.1"></label>
+        <label class="check"><input type="checkbox" id="c-sep"> Solar particle event</label>
+        <label class="check"><input type="checkbox" id="c-sans"> Vision changes (SANS)</label>
+        <label>Route mode
+          <select id="c-mode">
+            <option value="safest">Safest (landmarks in sight)</option>
+            <option value="homeInSight">Keep home in sight</option>
+            <option value="shortest">Shortest</option>
+          </select></label>
+        <p class="hint">Click the map to plan a route there.</p>
+      </section>
+    </aside>
+  </main>
+
+  <footer class="timeline" id="timeline">
+    <button type="button" id="t-play" class="btn" aria-label="Play demo">Play demo</button>
+    <button type="button" id="t-reset" class="btn btn-ghost">Restart</button>
+    <input type="range" id="t-scrub" min="0" max="200" step="1" value="0" aria-label="Scenario time">
+    <span id="t-label" class="mono">t = 0 min</span>
+  </footer>
+
+  <dialog id="dlg-sources" class="dlg">
+    <form method="dialog" class="dlg-head"><h2>How we know: every number and its source</h2><button class="btn btn-ghost">Close</button></form>
+    <div class="dlg-body"><table class="src-table"><thead><tr><th>What</th><th>Value</th><th>Type</th><th>Source</th></tr></thead><tbody id="src-rows"></tbody></table></div>
+  </dialog>
+
+  <dialog id="dlg-helmet" class="dlg dlg-full">
+    <form method="dialog" class="dlg-head"><h2>Helmet view</h2><button class="btn btn-ghost">Close</button></form>
+    <iframe id="helmet-frame" title="Helmet view" src="about:blank"></iframe>
+  </dialog>
+</body>
+</html>

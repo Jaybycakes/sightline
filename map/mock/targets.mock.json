@@ -1,0 +1,7 @@
+[
+  { "id": "landing", "name": "Octavia E. Butler Landing", "lat": 18.44463, "lon": 77.45089, "sol": 13, "source": "M20_waypoints.json" },
+  { "id": "three_forks", "name": "Three Forks sample depot (approx.)", "lat": 18.45252, "lon": 77.4072, "sol": 648, "source": "M20_waypoints.json" },
+  { "id": "cheyava_falls", "name": "Cheyava Falls sample area (approx.)", "lat": 18.495, "lon": 77.30628, "sol": 1174, "source": "M20_waypoints.json" },
+  { "id": "delta_top", "name": "Upper delta", "lat": 18.46776, "lon": 77.29101, "sol": 1320, "source": "M20_waypoints.json" },
+  { "id": "crater_rim", "name": "Crater rim", "lat": 18.4356, "lon": 77.23313, "sol": 2022, "source": "M20_waypoints.json" }
+]

@@ -1,0 +1,6 @@
+[
+  { "id": "home", "name": "Habitat", "lat": 18.4447, "lon": 77.4508, "heightM": 5, "kind": "habitat", "source": "Perseverance landing site" },
+  { "id": "mock_a", "name": "Mock butte W", "lat": 18.462, "lon": 77.395, "heightM": 0, "kind": "peak", "source": "MOCK — replace with data/landmarks.json" },
+  { "id": "mock_b", "name": "Mock delta front", "lat": 18.49, "lon": 77.33, "heightM": 0, "kind": "peak", "source": "MOCK" },
+  { "id": "mock_c", "name": "Mock rim high point", "lat": 18.38, "lon": 77.24, "heightM": 0, "kind": "rim", "source": "MOCK" }
+]

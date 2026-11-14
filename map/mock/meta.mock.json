@@ -1,0 +1,8 @@
+{
+  "bounds": { "latMin": 18.2110273909634, "latMax": 18.7211944818728,
+              "lonMin": 77.1604654592237, "lonMax": 77.6989751662947 },
+  "marsRadiusM": 3396190,
+  "home": { "id": "home", "name": "Habitat (Octavia E. Butler Landing)", "lat": 18.4447, "lon": 77.4508, "heightM": 5 },
+  "eyeHeightM": 1.7,
+  "gridFile": "data/heightgrid.json"
+}

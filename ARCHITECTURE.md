@@ -98,7 +98,7 @@ store = {
 | `posUncertaintyM` | `fixUncertaintyM + C.dead_reckoning_drift_pct/100 × distSinceFixM` |
 | `vis` = `{blind, homeHidden, w, h, homeVisiblePct3km}` | `visibilityArrays(limits.visibilityKm)` |
 | `routeOut` | `planRoute(... astronaut → target ...)` (null if no target) |
-| `routeHome` | `planRoute(... astronaut → home, mode 'safest' ...)` |
+| `routeHome` | `planRoute(... astronaut → home, mode = inputs.routeMode ...)` (the scenario's return leg always uses `'safest'`) |
 | `routeHomeKm` | remaining length of `routeHome` from the astronaut |
 | `budget` | `computeBudget(inputs, limits, routeHomeKm, C)` |
 | `warnings` | data/mocks/validation problems to show on screen |
@@ -145,8 +145,8 @@ export function derive(inputs, data, prev)                     // → derived
 ### Caching rules (keep it fast)
 - **Visibility** recomputes only when `round(visibilityKm)` changes (≤ ~150 values) — cache by that key.
 - **Routes** are replanned only when the **route key** changes:
-  `mode | target | maxSlopeDeg | round(visibilityKm) | sepActive | floor(evaMin / 10)`.
-  The astronaut's movement does **not** replan every tick; between replans `routeHomeKm` = remaining length along the cached route + distance from the astronaut to the nearest route point.
+  `mode | target | maxSlopeDeg | round(visibilityKm) | sepActive | floor(evaMin / 10) | astronaut rounded to 0.001° (~100 m)`.
+  Small movements do **not** replan; between replans `routeHomeKm` = remaining length along the cached route + distance from the astronaut to the nearest route point.
 - Budgets: A* ≤ 400k expansions (≈ < 300 ms); visibility ≤ 50 ms; one full `derive` ≤ 16 ms when caches hit.
 
 ### Store rules (prevents infinite loops)
