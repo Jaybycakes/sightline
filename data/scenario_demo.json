@@ -1,0 +1,41 @@
+{
+  "name": "Sol 12 EVA \u2014 May 2024 storm replay",
+  "sol": 12,
+  "startLtst": 9.0,
+  "start": {
+    "lat": 18.4447,
+    "lon": 77.4508
+  },
+  "target": "three_forks",
+  "events": [
+    {
+      "tMin": 0,
+      "type": "eva_start"
+    },
+    {
+      "tMin": 30,
+      "type": "tau",
+      "value": 0.5
+    },
+    {
+      "tMin": 60,
+      "type": "sep_onset",
+      "donkiId": "2024-05-11T02:10:00-SEP-001",
+      "note": "Replay trigger: strongest proton event of the May 2024 storm in DONKI (GOES >100 MeV, seen at Earth). Dose context: Curiosity RAD measured 8,100 \u00b5Gy at Mars in the 20 May 2024 event, which DONKI's SEP list does not include."
+    },
+    {
+      "tMin": 75,
+      "type": "tau",
+      "value": 2.0
+    },
+    {
+      "tMin": 90,
+      "type": "skyline_fix",
+      "site": "landing"
+    },
+    {
+      "tMin": 200,
+      "type": "eva_end"
+    }
+  ]
+}

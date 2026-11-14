@@ -1007,7 +1007,7 @@ mkdir -p raw && curl -L -o raw/dtm.tif "https://asc-pds-services.s3.us-west-2.am
 | `landmarks.py` | ✅ done → 13 landmarks (home + 9 buttes + 3 rim points). **Sean: check names on Mars Trek** |
 | `viewsheds.py` | ✅ done → 13 PNGs. Home visible within 1/2/3/5 km: 57/40/26/24% (prototype 54/37/25/22%) |
 | `check_data.py` | ✅ done |
-| `fetch_nasa.py` | ⏳ Sean → targets, traverse, DONKI, then `scenario_demo.json` |
+| `fetch_nasa.py` | ✅ done → traverse (708 waypoints), 5 targets, DONKI May 2024 (14 events), scenario. Note: DONKI's list ends 13 May, so the replay trigger is the GOES >100 MeV event of 11 May; Curiosity's 8,100 µGy was the 20 May event |
 | `skyline.py` | ⏳ Brayden + Sean |
 
 Re-run all terrain outputs (about 30 s), with numpy + Pillow installed:
