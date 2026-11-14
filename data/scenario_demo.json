@@ -18,6 +18,11 @@
       "value": 0.5
     },
     {
+      "tMin": 55,
+      "type": "skyline_fix",
+      "site": "three_forks"
+    },
+    {
       "tMin": 60,
       "type": "sep_onset",
       "donkiId": "2024-05-11T02:10:00-SEP-001",
@@ -26,12 +31,8 @@
     {
       "tMin": 75,
       "type": "tau",
-      "value": 2.0
-    },
-    {
-      "tMin": 90,
-      "type": "skyline_fix",
-      "site": "landing"
+      "value": 6.0,
+      "note": "Dust storm stronger than the Jan 2022 Jezero storm (\u03c4\u22482). Illustrative value for the demo."
     },
     {
       "tMin": 200,

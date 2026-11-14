@@ -1,5 +1,5 @@
 // Written with AI assistance (Claude / GitHub Copilot)
-// Side panels: answer card, crew/visibility/position cards, alerts, controls, clock, banner,
+// Side panels: answer card, right-now card, why list, collapsible controls, clock, banner,
 // timeline checkpoints, sources modal, data badge.
 // Renders from the store; control events call setInputs (user actions, never inside render).
 
@@ -21,17 +21,7 @@ const fmtMin = m => {
   return m >= 60 ? `${Math.floor(m / 60)} h ${Math.round(m % 60)} min` : `${Math.round(m)} min`;
 };
 const fmtNum = (v, digits = 0, unit = '') => (Number.isFinite(v) ? `${v.toFixed(digits)}${unit}` : '–');
-const fmtM = v => (Number.isFinite(v) ? `${Math.round(v)} m` : '–');
 const fmtKm = v => (Number.isFinite(v) ? `${v.toFixed(v < 10 ? 1 : 0)} km` : '–');
-
-// Crew card = factors that are not about dust, visibility or position; if none match, the 3 most severe.
-const NOT_CREW = /dust|vis|pos|fix|sky|landmark/i;
-const SEVERITY = { RED: 0, AMBER: 1, GREEN: 2 };
-function crewFactors(factors) {
-  const bySeverity = [...factors].sort((a, b) => SEVERITY[a.level] - SEVERITY[b.level]);
-  const crew = bySeverity.filter(f => !NOT_CREW.test(f.id));
-  return (crew.length ? crew : bySeverity).slice(0, 3);
-}
 
 const EVENT_LABELS = { eva_start: 'EVA start', sep_onset: 'Solar storm', skyline_fix: 'Skyline fix', eva_end: 'EVA end' };
 const eventLabel = ev => (ev.type === 'tau' ? `Dust τ ${ev.value}` : EVENT_LABELS[ev.type] ?? ev.type);
@@ -105,7 +95,7 @@ function dataBadge(data, usingStubs) {
   const b = el('div', 'mock-badge');
   b.setAttribute('role', 'status');
   b.append(el('strong', '', 'MOCK DATA'), document.createTextNode(` ${mocks.join(', ')}`));
-  document.body.append(b);
+  document.querySelector('.side').append(b);
 }
 
 function factorItem(f, byKey) {
@@ -150,19 +140,7 @@ export function createPanels(data, { setInputs, usingStubs }) {
     if (li) { e.preventDefault(); openSources(li.dataset.key); }
   });
 
-  let lastFactorsSig = '', lastCrewSig = '';
-
-  function renderCrew(factors) {
-    const crew = crewFactors(factors);
-    const sig = crew.map(f => `${f.id}:${f.level}`).join('|');
-    if (sig === lastCrewSig) return;
-    lastCrewSig = sig;
-    $('crew-list').replaceChildren(...crew.map(f => {
-      const li = el('li', f.level);
-      li.append(el('span', 'dot'), el('span', '', f.label), el('span', 'lvl', f.level));
-      return li;
-    }));
-  }
+  let lastFactorsSig = '';
 
   function renderAlerts(bdg, derived) {
     const sig = JSON.stringify(bdg.factors.map(f => [f.id, f.level, f.message])) + derived.warnings.join('|');
@@ -178,23 +156,24 @@ export function createPanels(data, { setInputs, usingStubs }) {
   }
 
   function renderCards(inputs, derived) {
-    const bdg = derived.budget;
-    const card = $('budget');
-    card.dataset.status = bdg.status;
+    const bdg = derived.budget, C = data.C;
+    $('budget').dataset.status = bdg.status;
     $('b-headline').textContent = bdg.headline;
     $('b-return').textContent = fmtMin(bdg.returnMin);
     $('b-km').textContent = fmtKm(derived.routeHomeKm);
     $('b-suit').textContent = fmtMin(Math.max(0, bdg.suitMinLeft));
     $('b-turn').textContent = bdg.marginMin <= 0 ? 'now' : fmtMin(bdg.turnBackInMin);
-    $('b-speed').textContent = fmtNum(derived.limits.speedKmh, 1, ' km/h');
-    $('b-vis').textContent = fmtKm(derived.limits.visibilityKm);
-    $('b-tau').textContent = fmtNum(inputs.tau, 1);
-    const pct = derived.vis.homeVisiblePct3km;
-    $('vis-stat').textContent = Number.isFinite(pct) ? `Home visible from ${Math.round(pct)}% of ground within 3 km` : '–';
+
+    $('now-dust').textContent = `τ ${fmtNum(inputs.tau, 1)} · you can see ~${fmtKm(derived.limits.visibilityKm)}`;
+    $('now-haze').style.width = `${Math.min(100, inputs.tau / 10 * 100)}%`;
+    $('now-devil').hidden = !(inputs.ltst >= C.dust_devil_peak_start_ltst && inputs.ltst <= C.dust_devil_peak_end_ltst);
     const posM = derived.posUncertaintyM;
-    $('b-pos').textContent = Number.isFinite(posM) ? `± ${Math.round(posM)} m` : '–';
-    $('b-fix').textContent = Number.isFinite(inputs.distSinceFixM) ? `${fmtM(inputs.distSinceFixM)} ago` : '–';
-    $('b-acc').textContent = Number.isFinite(inputs.fixUncertaintyM) ? `± ${Math.round(inputs.fixUncertaintyM)} m` : '–';
+    $('now-pos').textContent = Number.isFinite(posM)
+      ? `± ${Math.round(posM)} m · last fix ${fmtKm(inputs.distSinceFixM / 1000)} ago` : '–';
+    const recovering = inputs.sol < C.sensorimotor_recovery_days;
+    $('now-crew').textContent = `Sol ${inputs.sol} · ${recovering ? 'balance still recovering' : 'recovered'} · ${fmtNum(derived.limits.speedKmh, 1, ' km/h')}${inputs.sansAffected ? ' · vision changes' : ''}`;
+    const pct = derived.vis.homeVisiblePct3km;
+    $('vis-stat').textContent = Number.isFinite(pct) ? `Home is visible from ${Math.round(pct)}% of the ground within 3 km.` : '';
   }
 
   return function render({ inputs, derived }) {
@@ -205,7 +184,6 @@ export function createPanels(data, { setInputs, usingStubs }) {
     $('clk-eva').textContent = `${Math.round(inputs.evaMin)} min`;
 
     renderCards(inputs, derived);
-    renderCrew(derived.budget.factors);
     renderAlerts(derived.budget, derived);
     markCheckpoints(checkpoints, inputs.scenarioT);
 

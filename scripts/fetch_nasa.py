@@ -89,10 +89,14 @@ def main() -> None:
         "events": [
             {"tMin": 0, "type": "eva_start"},
             {"tMin": 30, "type": "tau", "value": 0.5},
+            # astronaut reaches Three Forks (~2.5 km) around t=45-55; fix there before turning back
+            {"tMin": 55, "type": "skyline_fix", "site": "three_forks"},
             {"tMin": 60, "type": "sep_onset", "donkiId": ev["sepID"],
              "note": "Replay trigger: strongest proton event of the May 2024 storm in DONKI (GOES >100 MeV, seen at Earth). Dose context: Curiosity RAD measured 8,100 µGy at Mars in the 20 May 2024 event, which DONKI's SEP list does not include."},
-            {"tMin": 75, "type": "tau", "value": 2.0},
-            {"tMin": 90, "type": "skyline_fix", "site": "landing"},
+            # Dust spike. τ 2 (Jan 2022 Jezero storm, Lemmon et al. 2022) leaves visibility ~23 km, beyond every
+            # landmark, so it changes nothing on the map. τ 6 is a stronger regional storm (global storms go higher).
+            {"tMin": 75, "type": "tau", "value": 6.0,
+             "note": "Dust storm stronger than the Jan 2022 Jezero storm (τ≈2). Illustrative value for the demo."},
             {"tMin": 200, "type": "eva_end"},
         ],
     }

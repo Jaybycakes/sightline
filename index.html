@@ -46,53 +46,53 @@
         <span><i class="sw sw-red"></i>No landmark in sight</span>
         <span><i class="sw sw-amber"></i>Home hidden, landmark visible</span>
         <span><i class="sw sw-clear"></i>Home in sight</span>
+        <span><i class="sw sw-ring"></i>How far you can see (dust)</span>
       </div>
     </section>
 
-    <aside class="side" aria-label="Walk budget and controls">
+    <aside class="side" aria-label="Walk budget">
       <section class="card budget" id="budget" data-status="GREEN" aria-live="polite">
         <h2 id="b-headline" class="headline">–</h2>
         <p class="question">Can this astronaut still get home?</p>
-        <p class="home"><span id="b-return" class="home-min">–</span><span class="home-unit">to walk home · <span id="b-km">–</span></span></p>
+        <p class="home"><span id="b-return" class="home-min">–</span><span class="home-unit">walk home · <span id="b-km">–</span></span></p>
         <dl class="mini">
           <div><dt>Suit time left</dt><dd id="b-suit">–</dd></div>
           <div><dt>Turn back in</dt><dd id="b-turn">–</dd></div>
         </dl>
       </section>
 
-      <div class="trio">
-        <section class="card crew">
-          <h2>Crew</h2>
-          <ul id="crew-list" class="factors"></ul>
-          <p class="row"><span>Walking speed</span><span id="b-speed" class="mono">–</span></p>
-        </section>
-        <section class="card">
-          <h2>Visibility</h2>
-          <p class="big"><span id="b-vis">–</span></p>
-          <p class="row"><span>Dust τ</span><span id="b-tau" class="mono">–</span></p>
-          <p id="vis-stat" class="stat"></p>
-        </section>
-        <section class="card">
-          <h2>Position</h2>
-          <p class="big"><span id="b-pos">–</span></p>
-          <p class="row"><span>Last fix</span><span id="b-fix" class="mono">–</span></p>
-          <p class="row"><span>Fix accuracy</span><span id="b-acc" class="mono">–</span></p>
-        </section>
-      </div>
+      <section class="card now" aria-labelledby="now-h">
+        <h2 id="now-h">Right now</h2>
+        <dl class="now-list">
+          <div class="now-row">
+            <dt>Dust</dt>
+            <dd><span id="now-dust">–</span><span class="haze" aria-hidden="true"><span id="now-haze"></span></span><span id="now-devil" class="chip" hidden>Dust-devil hours</span></dd>
+          </div>
+          <div class="now-row">
+            <dt>Position</dt>
+            <dd id="now-pos">–</dd>
+          </div>
+          <div class="now-row">
+            <dt>Crew</dt>
+            <dd id="now-crew">–</dd>
+          </div>
+        </dl>
+        <p id="vis-stat" class="stat"></p>
+      </section>
 
-      <section class="card">
-        <h2>Alerts</h2>
+      <section class="card" aria-labelledby="why-h">
+        <h2 id="why-h">Why</h2>
         <ul id="alerts" class="alerts"></ul>
       </section>
 
-      <section class="card controls" id="controls">
-        <h2>Conditions</h2>
+      <details class="card controls" id="controls">
+        <summary>Change conditions</summary>
         <label>Sols since landing <output id="o-sol"></output>
           <input type="range" id="c-sol" min="0" max="60" step="1"></label>
         <label>Local solar time <output id="o-ltst"></output>
           <input type="range" id="c-ltst" min="6" max="19" step="0.25"></label>
         <label>Dust optical depth τ <output id="o-tau"></output>
-          <input type="range" id="c-tau" min="0.2" max="5" step="0.1"></label>
+          <input type="range" id="c-tau" min="0.2" max="10" step="0.1"></label>
         <label class="check"><input type="checkbox" id="c-sep"> Solar particle event</label>
         <label class="check"><input type="checkbox" id="c-sans"> Vision changes (SANS)</label>
         <label>Route mode
@@ -102,7 +102,7 @@
             <option value="shortest">Shortest</option>
           </select></label>
         <p class="hint">Click the map to plan a route there.</p>
-      </section>
+      </details>
     </aside>
   </main>
 

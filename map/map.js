@@ -9,8 +9,12 @@ const TERRAIN_SRC = 'lib/terrain.js';
 const EXAGGERATE = 2;
 const ASTRO_R = 25, ASTRO_LIFT = 50, BEACON_H = 400, LIFT_M = 15, ROUTE_R = 10, STEP_M = 60;
 const PITCH_MIN = 0.08, PITCH_MAX = 1.5, CAM_CLEARANCE_M = 40;
-const COLORS = { blind: [248, 81, 73, 110], homeHidden: [210, 153, 34, 60] };
-const CREAM = '#fff4e0', INK = '#1a110c', ACCENT = '#ff8a3d';
+const COLORS = { blind: [248, 81, 73, 120], homeHidden: [210, 153, 34, 32] };
+const CREAM = '#fff4e0', INK = '#1a110c', ACCENT = '#ff8a3d', DUST = '#c98a55';
+// Dust look (visual only, driven by τ): haze opacity and sky colour. Not a measured haze map.
+const HAZE_PER_TAU = 0.06, HAZE_MAX = 0.6;
+const SKY_CLEAR = [227, 167, 106], SKY_DUSTY = [168, 120, 84], TAU_DUSTY = 8;
+const DEVIL_OFFSETS_M = [[900, 300], [-700, 1200], [400, -1100]]; // illustrative swirl positions around the astronaut
 const $ = id => document.getElementById(id);
 
 // ---------- 2D (Leaflet) ----------
@@ -45,7 +49,11 @@ function routeLine(map, color, weight, dashArray) {
 }
 
 function addLayers(map, data, box, onPickTarget) {
-  if (data.hasBasemap) L.imageOverlay('data/basemap.png', box, { opacity: 1, interactive: false }).addTo(map);
+  // Offline fallback UNDER the NASA tiles (image overlays default to above tiles, which hid the real imagery)
+  if (data.hasBasemap) {
+    map.createPane('basemap').style.zIndex = 150; // tilePane is 200
+    L.imageOverlay('data/basemap.png', box, { opacity: 1, interactive: false, pane: 'basemap' }).addTo(map);
+  }
   const ctx = L.tileLayer(`${TREK}JEZ_ctx_B_soc_008_orthoMosaic_6m_Eqc_latTs0_lon0${TILE_PATH}`, {
     maxNativeZoom: 13, maxZoom: 18, bounds: box,
     attribution: 'CTX mosaic: NASA/JPL-Caltech/MSSS · via NASA Mars Trek'
@@ -187,7 +195,7 @@ function setRoute(s, terrain, name, route, color) {
 function createView3D() {
   const host = $('view3d'), msg = $('v3-msg');
   $('v3-note').textContent = `Vertical scale ×${EXAGGERATE}`;
-  let s = null, starting = null, terrain = null, last = null, lastHome, lastOut, lastRadius = -1;
+  let s = null, starting = null, terrain = null, last = null, lastHome, lastOut, lastRadius = -1, lastTau = null;
   const say = text => { msg.textContent = text; msg.hidden = !text; };
 
   function update() {
@@ -205,6 +213,17 @@ function createView3D() {
     if (orbit) { orbit.setTarget(p.x, p.y, p.z); orbit.heightAt = (x, z) => terrain.heightAt(x, z); }
     if (d.routeHome !== lastHome) { lastHome = d.routeHome; setRoute(s, terrain, 'home', d.routeHome, CREAM); }
     if (d.routeOut !== lastOut) { lastOut = d.routeOut; setRoute(s, terrain, 'out', d.routeOut, ACCENT); }
+    const tau = Math.round(last.inputs.tau * 10) / 10;
+    if (tau !== lastTau) {
+      lastTau = tau;
+      const f = Math.min(1, tau / TAU_DUSTY);
+      const sky = SKY_CLEAR.map((c, i) => Math.round(c + (SKY_DUSTY[i] - c) * f));
+      const color = `rgb(${sky.join(',')})`;
+      const far = Math.max(3000, d.limits.visibilityKm * 1000);
+      s.scene.setAttribute('background', `color: ${color}`);
+      s.scene.setAttribute('fog', `type: linear; color: ${color}; near: ${Math.round(far * 0.15)}; far: ${Math.round(far)}`);
+      host.style.background = color;
+    }
   }
 
   async function init() {
@@ -252,6 +271,7 @@ function setupToggle(map, view3d) {
 // ---------- entry ----------
 
 export function createMapView(data, { onPickTarget }) {
+  const store0 = { data };
   const b = data.bounds;
   const box = [[b.latMin, b.lonMin], [b.latMax, b.lonMax]];
   const map = L.map('map', {
@@ -262,6 +282,9 @@ export function createMapView(data, { onPickTarget }) {
   const blindLayer = addLayers(map, data, box, onPickTarget);
   const setRouteOut = routeLine(map, ACCENT, 4);
   const setRouteHome = routeLine(map, CREAM, 3, '8 6');
+  const haze = L.rectangle(box, { stroke: false, fillColor: DUST, fillOpacity: 0, interactive: false }).addTo(map);
+  const seeRing = L.circle([0, 0], { radius: 1000, color: DUST, weight: 2, dashArray: '6 6', fill: false, interactive: false }).addTo(map);
+  const devils = L.layerGroup().addTo(map);
   const uncertainty = L.circle([0, 0], { radius: 30, color: CREAM, weight: 1.5, fillColor: CREAM, fillOpacity: 0.12 }).addTo(map);
   const astro = L.marker([0, 0], { icon: astronautIcon(0), keyboard: false, zIndexOffset: 1000 }).addTo(map);
   map.on('click', e => onPickTarget({ lat: e.latlng.lat, lon: e.latlng.lng }));
@@ -269,7 +292,25 @@ export function createMapView(data, { onPickTarget }) {
   const view3d = createView3D();
   setupToggle(map, view3d);
 
-  let lastVisKey = null, lastHeading = null;
+  let lastVisKey = null, lastHeading = null, lastDevils = null;
+  function renderWeather({ inputs, derived }) {
+    const C = store0.data.C, a = inputs.astronaut;
+    haze.setStyle({ fillOpacity: Math.min(HAZE_MAX, inputs.tau * HAZE_PER_TAU) });
+    seeRing.setLatLng([a.lat, a.lon]).setRadius(derived.limits.visibilityKm * 1000);
+    const devilHours = inputs.ltst >= C.dust_devil_peak_start_ltst && inputs.ltst <= C.dust_devil_peak_end_ltst;
+    const key = devilHours ? `${a.lat.toFixed(3)},${a.lon.toFixed(3)}` : null;
+    if (key === lastDevils) return;
+    lastDevils = key;
+    devils.clearLayers();
+    if (!devilHours) return;
+    const mPerDegLat = 2 * Math.PI * 3396190 / 360; // Mars: ~59.3 km per degree of latitude
+    for (const [dx, dy] of DEVIL_OFFSETS_M) {
+      const lat = a.lat + dy / mPerDegLat, lon = a.lon + dx / (mPerDegLat * Math.cos(a.lat * Math.PI / 180));
+      L.marker([lat, lon], { icon: L.divIcon({ className: 'devil', html: '<span></span>', iconSize: [36, 36] }), interactive: true, keyboard: false })
+        .bindTooltip('Dust-devil hours: illustrative swirl, not a forecast position')
+        .addTo(devils);
+    }
+  }
   function render(store) {
     const { inputs, derived } = store;
     if (derived.visKey !== lastVisKey) { blindLayer.setUrl(drawOverlay(derived.vis)); lastVisKey = derived.visKey; }
@@ -280,6 +321,7 @@ export function createMapView(data, { onPickTarget }) {
     const h = Math.round(a.headingDeg / 5) * 5;
     if (h !== lastHeading) { astro.setIcon(astronautIcon(h)); lastHeading = h; }
     uncertainty.setLatLng([a.lat, a.lon]).setRadius(derived.posUncertaintyM);
+    renderWeather(store);
     setRouteHome(derived.routeHome?.ok ? derived.routeHome.points : []);
     setRouteOut(derived.routeOut?.ok ? derived.routeOut.points : []);
     view3d.render(store);
