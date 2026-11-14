@@ -22,6 +22,22 @@ mkdir -p raw && curl -L -o raw/dtm.tif "https://asc-pds-services.s3.us-west-2.am
 - No-data values are < −10000 → set to NaN. Pillow can open it: `np.array(Image.open('raw/dtm.tif'), dtype=np.float32)`.
 - Ground metres per pixel: north–south 20.0; east–west 20.0 × cos(lat).
 
+## Status (Sat 14 Nov)
+| Script | Status |
+|---|---|
+| `dtm.py` (shared helpers) | ✅ done |
+| `make_grid.py` | ✅ done → meta, heightgrid, heightmap, basemap committed |
+| `landmarks.py` | ✅ done → 13 landmarks (home + 9 buttes + 3 rim points). **Sean: check names on Mars Trek** |
+| `viewsheds.py` | ✅ done → 13 PNGs. Home visible within 1/2/3/5 km: 57/40/26/24% (prototype 54/37/25/22%) |
+| `check_data.py` | ✅ done |
+| `fetch_nasa.py` | ⏳ Sean → targets, traverse, DONKI, then `scenario_demo.json` |
+| `skyline.py` | ⏳ Brayden + Sean |
+
+Re-run all terrain outputs (about 30 s), with numpy + Pillow installed:
+```bash
+python3 scripts/make_grid.py && python3 scripts/landmarks.py && python3 scripts/viewsheds.py && python3 scripts/check_data.py
+```
+
 ## Scripts to write
 
 ### 1. `scripts/make_grid.py` → `data/meta.json`, `data/heightgrid.json`, `data/heightmap.png`, `data/basemap.png` (Sean — FIRST, others are waiting)
@@ -64,7 +80,7 @@ Exit code 0 = all good. It lists every problem otherwise.
 ## Rules
 - Every script prints what it wrote and key numbers (for our notes / the video).
 - Header line `# Written with AI assistance (Claude / GitHub Copilot)`.
-- Run Python on downloaded files with `python3 -I` (isolated mode) for safety.
+- Keep downloaded files in `raw/` and never run code from there; our scripts only read them as data.
 - Commit the **outputs in `data/`**, not the raw `.tif`.
 
 ## Acceptance checklist

@@ -1,0 +1,131 @@
+[
+  {
+    "id": "home",
+    "name": "Habitat (Octavia E. Butler Landing)",
+    "lat": 18.4447,
+    "lon": 77.4508,
+    "heightM": 5,
+    "kind": "habitat",
+    "source": "Perseverance landing site"
+  },
+  {
+    "id": "peak_01",
+    "name": "Butte NE 1.1 km",
+    "lat": 18.45464,
+    "lon": 77.46751,
+    "heightM": 0,
+    "kind": "peak",
+    "reliefM": 49,
+    "source": "auto-picked from CTX DTM (not yet checked on Mars Trek)"
+  },
+  {
+    "id": "peak_02",
+    "name": "Butte W 2.4 km",
+    "lat": 18.43979,
+    "lon": 77.40813,
+    "heightM": 0,
+    "kind": "peak",
+    "reliefM": 75,
+    "source": "auto-picked from CTX DTM (not yet checked on Mars Trek)"
+  },
+  {
+    "id": "peak_03",
+    "name": "Butte NE 3.0 km",
+    "lat": 18.46949,
+    "lon": 77.4972,
+    "heightM": 0,
+    "kind": "peak",
+    "reliefM": 71,
+    "source": "auto-picked from CTX DTM (not yet checked on Mars Trek)"
+  },
+  {
+    "id": "peak_04",
+    "name": "Butte SE 5.1 km",
+    "lat": 18.37231,
+    "lon": 77.50125,
+    "heightM": 0,
+    "kind": "peak",
+    "reliefM": 37,
+    "source": "auto-picked from CTX DTM (not yet checked on Mars Trek)"
+  },
+  {
+    "id": "peak_05",
+    "name": "Butte SE 6.0 km",
+    "lat": 18.40605,
+    "lon": 77.54849,
+    "heightM": 0,
+    "kind": "peak",
+    "reliefM": 34,
+    "source": "auto-picked from CTX DTM (not yet checked on Mars Trek)"
+  },
+  {
+    "id": "peak_06",
+    "name": "Butte S 6.5 km",
+    "lat": 18.33452,
+    "lon": 77.45401,
+    "heightM": 0,
+    "kind": "peak",
+    "reliefM": 39,
+    "source": "auto-picked from CTX DTM (not yet checked on Mars Trek)"
+  },
+  {
+    "id": "peak_07",
+    "name": "Butte NW 6.7 km",
+    "lat": 18.54237,
+    "lon": 77.39193,
+    "heightM": 0,
+    "kind": "peak",
+    "reliefM": 49,
+    "source": "auto-picked from CTX DTM (not yet checked on Mars Trek)"
+  },
+  {
+    "id": "peak_08",
+    "name": "Butte SE 6.8 km",
+    "lat": 18.35072,
+    "lon": 77.52015,
+    "heightM": 0,
+    "kind": "peak",
+    "reliefM": 50,
+    "source": "auto-picked from CTX DTM (not yet checked on Mars Trek)"
+  },
+  {
+    "id": "peak_09",
+    "name": "Butte N 7.9 km",
+    "lat": 18.57746,
+    "lon": 77.44052,
+    "heightM": 0,
+    "kind": "peak",
+    "reliefM": 82,
+    "source": "auto-picked from CTX DTM (not yet checked on Mars Trek)"
+  },
+  {
+    "id": "rim_10",
+    "name": "Rim high point W 10.7 km",
+    "lat": 18.4236,
+    "lon": 77.26236,
+    "heightM": 0,
+    "kind": "rim",
+    "reliefM": 276,
+    "source": "auto-picked from CTX DTM (not yet checked on Mars Trek)"
+  },
+  {
+    "id": "rim_11",
+    "name": "Rim high point SW 14.7 km",
+    "lat": 18.24004,
+    "lon": 77.30285,
+    "heightM": 0,
+    "kind": "rim",
+    "reliefM": 193,
+    "source": "auto-picked from CTX DTM (not yet checked on Mars Trek)"
+  },
+  {
+    "id": "rim_12",
+    "name": "Rim high point N 16.4 km",
+    "lat": 18.72052,
+    "lon": 77.42432,
+    "heightM": 0,
+    "kind": "rim",
+    "reliefM": 191,
+    "source": "auto-picked from CTX DTM (not yet checked on Mars Trek)"
+  }
+]
