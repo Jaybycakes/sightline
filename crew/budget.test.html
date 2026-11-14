@@ -1,0 +1,94 @@
+<!doctype html>
+<!-- Written with AI assistance (Claude / GitHub Copilot) -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>crew/budget.js tests</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 16px; background: #fff; color: #111; }
+  ul { list-style: none; padding: 0; }
+  li { font-family: ui-monospace, monospace; padding: 2px 0; }
+  li.pass { color: #0a6b2d; }
+  li.fail { color: #b00020; font-weight: bold; }
+  #summary { font-weight: bold; margin-top: 12px; }
+</style>
+</head>
+<body>
+<h1>crew/budget.js tests</h1>
+<ul id="list"></ul>
+<div id="summary">running...</div>
+<script type="module">
+import { REQUIRED_KEYS, computeLimits, computeBudget } from './budget.js';
+
+const list = document.getElementById('list');
+const summary = document.getElementById('summary');
+let passed = 0, total = 0;
+
+function report(name, ok, detail) {
+  total++;
+  if (ok) passed++;
+  console.assert(ok, name, detail || '');
+  const li = document.createElement('li');
+  li.className = ok ? 'pass' : 'fail';
+  li.textContent = (ok ? 'PASS ' : 'FAIL ') + name + (detail ? ' (' + detail + ')' : '');
+  list.appendChild(li);
+}
+
+function run(name, fn) {
+  try {
+    const r = fn();
+    report(name, r.ok, r.detail);
+  } catch (e) {
+    report(name, false, 'threw: ' + e.message);
+  }
+}
+
+try {
+  const rows = await (await fetch('../data/crew_constants.json')).json();
+  const C = Object.fromEntries(rows.map(r => [r.key, r.value]));
+  const BASE = { sol: 30, ltst: 10, evaMin: 60, tau: 0.4, sepActive: false, pressurePa: 718, tempC: -30, sansAffected: false };
+  const budget = (over, home = 2) => {
+    const inputs = { ...BASE, ...over };
+    return computeBudget(inputs, computeLimits(inputs, C), home, C);
+  };
+  const lim = over => computeLimits({ ...BASE, ...over }, C);
+  const factor = (b, id) => b.factors.find(f => f.id === id);
+
+  run('1 base case is GREEN', () => { const b = budget({}); return { ok: b.status === 'GREEN', detail: b.status }; });
+  run('2 SEP active is RED / RETURN NOW', () => {
+    const b = budget({ sepActive: true });
+    return { ok: b.status === 'RED' && b.headline === 'RETURN NOW', detail: b.status + ' / ' + b.headline };
+  });
+  run('3 evaMin 420, home 3 km: suit time RED', () => {
+    const b = budget({ evaMin: 420 }, 3);
+    const f = factor(b, 'suit_time');
+    return { ok: f.level === 'RED' && b.marginMin <= 0, detail: 'margin ' + b.marginMin.toFixed(1) };
+  });
+  run('4 tau 2.0: visibility ~29 km, with SANS ~23 km', () => {
+    const a = lim({ tau: 2.0 }).visibilityKm, s = lim({ tau: 2.0, sansAffected: true }).visibilityKm;
+    return { ok: Math.abs(a - 29.3) <= 1 && Math.abs(s - 23.5) <= 1, detail: a.toFixed(1) + ' / ' + s.toFixed(1) };
+  });
+  run('5 sol 0: speed = 0.6 x base, maxSlopeDeg 10', () => {
+    const l = lim({ sol: 0 });
+    return { ok: Math.abs(l.speedKmh - 0.6 * C.walk_speed_kmh) < 1e-9 && l.maxSlopeDeg === 10, detail: l.speedKmh.toFixed(2) + ' km/h, ' + l.maxSlopeDeg + ' deg' };
+  });
+  run('6 pressure 950 Pa: cooling RED', () => {
+    const f = factor(budget({ pressurePa: 950 }), 'cooling');
+    return { ok: f.level === 'RED', detail: f.level };
+  });
+  run('7 missing required key makes computeLimits throw', () => {
+    const copy = { ...C };
+    delete copy[REQUIRED_KEYS[0]];
+    let msg = '';
+    try { computeLimits(BASE, copy); } catch (e) { msg = e.message; }
+    return { ok: msg.includes('missing constants') && msg.includes(REQUIRED_KEYS[0]), detail: msg };
+  });
+} catch (e) {
+  report('setup (fetch constants)', false, e.message);
+}
+
+summary.textContent = passed + '/' + total + ' passed';
+</script>
+</body>
+</html>

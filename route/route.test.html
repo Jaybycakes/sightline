@@ -1,0 +1,126 @@
+<!-- Written with AI assistance (Claude / GitHub Copilot) -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>route.js tests</title>
+<style>
+  body { font: 14px/1.5 ui-monospace, Consolas, monospace; margin: 24px; }
+  li { list-style: none; }
+  .pass { color: #0a7a2f; }
+  .fail { color: #b00020; font-weight: bold; }
+  #summary { margin-top: 12px; font-weight: bold; }
+</style>
+</head>
+<body>
+<h1>route.js tests</h1>
+<ul id="results"></ul>
+<div id="summary"></div>
+<script type="module">
+import { planRoute } from './route.js';
+import { toCell, toLatLon, distM } from '../lib/geo.js';
+
+// ---- mock grid helpers: 60x60 cells of 80 m, ~4.8 km square near lat 18.4 ----
+const N = 60;
+const SPAN = (N * 80 / 3396190) * 180 / Math.PI; // degrees; same in lat and lon (cos lat folded into dx)
+const bounds = { latMin: 18.4, latMax: 18.4 + SPAN, lonMin: 77.4, lonMax: 77.4 + SPAN };
+const OPTS = { mode: 'shortest', maxSlopeDeg: 15, speedKmh: 3.3 };
+
+function mockGrid() { return { w: N, h: N, cellM: 80, min: 0, max: 0, data: new Array(N * N).fill(0) }; }
+function mockVis() { return { blind: new Uint8Array(N * N), homeHidden: new Uint8Array(N * N), w: N, h: N }; }
+function at(r, c) { const p = toLatLon({ w: N, h: N }, bounds, r, c); return { lat: p.lat, lon: p.lon }; }
+
+const tests = [];
+function test(name, fn) { tests.push({ name, fn }); }
+
+test('1 flat grid: length ~ straight line (+-10%)', () => {
+  const a = at(30, 5), b = at(30, 55);
+  const res = planRoute(mockGrid(), bounds, mockVis(), a, b, OPTS);
+  const straightKm = distM(a.lat, a.lon, b.lat, b.lon) / 1000;
+  console.assert(res.ok && Math.abs(res.lengthKm - straightKm) / straightKm <= 0.10, 'test 1', res);
+  return res.ok && Math.abs(res.lengthKm - straightKm) / straightKm <= 0.10;
+});
+
+test('2 steep wall with one gap: path goes through the gap', () => {
+  const g = mockGrid();
+  for (let r = 0; r < N; r++) if (r !== 8) g.data[r * N + 30] = 1000;
+  const res = planRoute(g, bounds, mockVis(), at(50, 10), at(50, 50), OPTS);
+  let throughGap = false;
+  if (res.ok) {
+    // gap is row 8; the route must come within one row of it at the wall column
+    for (const [lat, lon] of res.points) {
+      const cell = toCell(g, bounds, lat, lon);
+      if (Math.abs(cell.r - 8) <= 1 && Math.abs(cell.c - 30) <= 2) throughGap = true;
+    }
+  }
+  console.assert(res.ok && throughGap, 'test 2', res);
+  return res.ok && throughGap;
+});
+
+test('3 safest avoids blind block that shortest crosses', () => {
+  const v = mockVis();
+  for (let r = 10; r <= 50; r++) for (let c = 25; c <= 35; c++) v.blind[r * N + c] = 1;
+  const a = at(30, 5), b = at(30, 55);
+  const sh = planRoute(mockGrid(), bounds, v, a, b, { ...OPTS, mode: 'shortest' });
+  const sa = planRoute(mockGrid(), bounds, v, a, b, { ...OPTS, mode: 'safest' });
+  const good = sh.ok && sa.ok && sh.blindFraction > 0 && sa.blindFraction < sh.blindFraction;
+  console.assert(good, 'test 3', sh, sa);
+  return good;
+});
+
+test('4 goal surrounded by steep cells: ok:false with reason', () => {
+  const g = mockGrid();
+  for (let r = 29; r <= 31; r++) for (let c = 29; c <= 31; c++) if (!(r === 30 && c === 30)) g.data[r * N + c] = 1000;
+  const res = planRoute(g, bounds, mockVis(), at(5, 5), at(30, 30), OPTS);
+  const good = res.ok === false && typeof res.reason === 'string' && res.reason.length > 0;
+  console.assert(good, 'test 4', res);
+  return good;
+});
+
+test('5 vis size mismatch: ok:false "visibility grid size mismatch"', () => {
+  const v = { blind: new Uint8Array(10 * 10), homeHidden: new Uint8Array(10 * 10), w: 10, h: 10 };
+  const res = planRoute(mockGrid(), bounds, v, at(5, 5), at(50, 50), OPTS);
+  const good = res.ok === false && res.reason === 'visibility grid size mismatch';
+  console.assert(good, 'test 5', res);
+  return good;
+});
+
+test('6 start outside bounds: reason "outside map"', () => {
+  const res = planRoute(mockGrid(), bounds, mockVis(), { lat: 10, lon: 10 }, at(50, 50), OPTS);
+  const good = res.ok === false && res.reason === 'outside map';
+  console.assert(good, 'test 6', res);
+  return good;
+});
+
+test('7 null grid does not throw', () => {
+  let res, threw = false;
+  try { res = planRoute(null, bounds, mockVis(), at(5, 5), at(50, 50), OPTS); } catch (e) { threw = true; }
+  const good = !threw && res && res.ok === false && typeof res.reason === 'string';
+  console.assert(good, 'test 7', res);
+  return good;
+});
+
+// ---- run ----
+const results = tests.map((t) => {
+  let pass = false;
+  try { pass = !!t.fn(); } catch (e) { pass = false; console.error(t.name, e); }
+  return { name: t.name, pass };
+});
+const passed = results.filter((r) => r.pass).length;
+
+if (typeof document !== 'undefined') {
+  const ul = document.getElementById('results');
+  for (const r of results) {
+    const li = document.createElement('li');
+    li.className = r.pass ? 'pass' : 'fail';
+    li.textContent = (r.pass ? 'PASS ' : 'FAIL ') + r.name;
+    ul.appendChild(li);
+  }
+  document.getElementById('summary').textContent = passed + '/' + results.length + ' passed';
+} else {
+  for (const r of results) console.log((r.pass ? 'PASS ' : 'FAIL ') + r.name);
+  console.log(passed + '/' + results.length + ' passed');
+}
+</script>
+</body>
+</html>

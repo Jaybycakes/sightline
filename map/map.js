@@ -14,7 +14,69 @@ const CREAM = '#fff4e0', INK = '#1a110c', ACCENT = '#ff8a3d', DUST = '#c98a55';
 // Dust look (visual only, driven by τ): haze opacity and sky colour. Not a measured haze map.
 const HAZE_PER_TAU = 0.06, HAZE_MAX = 0.6;
 const SKY_CLEAR = [227, 167, 106], SKY_DUSTY = [168, 120, 84], TAU_DUSTY = 8;
-const DEVIL_OFFSETS_M = [[900, 300], [-700, 1200], [400, -1100]]; // illustrative swirl positions around the astronaut
+// Dust devils (illustrative, not forecast positions). Spawn offsets in metres [east, north] around the astronaut.
+const DEVIL_SPAWN_M = [[900, 300], [-700, 1200], [400, -1100], [-1500, -500]];
+const DEVIL_TIMELAPSE = 30;        // shown 30x faster than real time so the drift is visible
+const DEVIL_WIND_DEG = 60;         // drift direction (towards ENE); illustrative
+const DEVIL_RESPAWN_M = 3500;      // a devil that drifts this far away is replaced upwind
+const DEVIL_WIDTH_M = 150;         // drawn width; Newman et al. 2022 saw devils up to ~270 m wide
+const M_PER_DEG = 2 * Math.PI * 3396190 / 360;
+const DEVIL_SVG = '<svg viewBox="-20 -20 40 40" aria-hidden="true"><circle r="15"/><path d="M0-16A16 16 0 0 1 14 8M0 16A16 16 0 0 1-14-8"/><path d="M0-9A9 9 0 0 1 8 4M0 9A9 9 0 0 1-8-4"/></svg>';
+
+// Moving dust devils: one rAF loop, runs only while visible (devil hours, 2D map shown, tab visible).
+function createDevils(map, C) {
+  const layer = L.layerGroup().addTo(map);
+  const speedMs = C.dust_devil_drift_ms ?? 5;
+  const rad = DEVIL_WIND_DEG * Math.PI / 180;
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let items = [], raf = 0, last = 0, anchor = null, on = false;
+
+  const sizePx = () => {
+    const degPerPx = 180 / (256 * 2 ** map.getZoom());
+    return Math.max(40, Math.round(DEVIL_WIDTH_M / (degPerPx * M_PER_DEG)));
+  };
+  const icon = () => { const px = sizePx(); return L.divIcon({ className: 'devil', html: DEVIL_SVG, iconSize: [px, px] }); };
+  const place = (lat, lon, [dx, dy]) => [lat + dy / M_PER_DEG, lon + dx / (M_PER_DEG * Math.cos(lat * Math.PI / 180))];
+
+  function spawn() {
+    layer.clearLayers();
+    items = DEVIL_SPAWN_M.map(off => {
+      const m = L.marker(place(anchor.lat, anchor.lon, off), { icon: icon(), keyboard: false, interactive: true })
+        .bindTooltip(`Dust-devil hours (illustrative, not a forecast). Drifting with the wind at ~${speedMs} m/s, shown ${DEVIL_TIMELAPSE}× faster.`)
+        .addTo(layer);
+      return { m, off };
+    });
+  }
+  function frame(now) {
+    const dt = Math.min(0.1, (now - last) / 1000); last = now;
+    const step = speedMs * DEVIL_TIMELAPSE * dt;
+    for (const it of items) {
+      const ll = it.m.getLatLng();
+      let [lat, lon] = place(ll.lat, ll.lng, [Math.sin(rad) * step, Math.cos(rad) * step]);
+      const dE = (lon - anchor.lon) * M_PER_DEG * Math.cos(anchor.lat * Math.PI / 180), dN = (lat - anchor.lat) * M_PER_DEG;
+      if (Math.hypot(dE, dN) > DEVIL_RESPAWN_M) [lat, lon] = place(anchor.lat, anchor.lon, [-Math.sin(rad) * 2500 + it.off[1] * 0.5, -Math.cos(rad) * 2500 + it.off[0] * 0.5]);
+      it.m.setLatLng([lat, lon]);
+    }
+    raf = requestAnimationFrame(frame);
+  }
+  const run = () => {
+    cancelAnimationFrame(raf);
+    if (on && !reduce && !document.hidden && !$('map').hidden) { last = performance.now(); raf = requestAnimationFrame(frame); }
+  };
+  map.on('zoomend', () => { const ic = icon(); items.forEach(it => it.m.setIcon(ic)); });
+  document.addEventListener('visibilitychange', run);
+
+  return {
+    update(active, a) {
+      if (active && !on) { anchor = { lat: a.lat, lon: a.lon }; spawn(); }
+      if (!active && on) layer.clearLayers();
+      if (active) anchor = { lat: a.lat, lon: a.lon };
+      on = active;
+      run();
+    },
+    refresh: run
+  };
+}
 const $ = id => document.getElementById(id);
 
 // ---------- 2D (Leaflet) ----------
@@ -284,32 +346,21 @@ export function createMapView(data, { onPickTarget }) {
   const setRouteHome = routeLine(map, CREAM, 3, '8 6');
   const haze = L.rectangle(box, { stroke: false, fillColor: DUST, fillOpacity: 0, interactive: false }).addTo(map);
   const seeRing = L.circle([0, 0], { radius: 1000, color: DUST, weight: 2, dashArray: '6 6', fill: false, interactive: false }).addTo(map);
-  const devils = L.layerGroup().addTo(map);
+  const devils = createDevils(map, data.C);
   const uncertainty = L.circle([0, 0], { radius: 30, color: CREAM, weight: 1.5, fillColor: CREAM, fillOpacity: 0.12 }).addTo(map);
   const astro = L.marker([0, 0], { icon: astronautIcon(0), keyboard: false, zIndexOffset: 1000 }).addTo(map);
   map.on('click', e => onPickTarget({ lat: e.latlng.lat, lon: e.latlng.lng }));
 
   const view3d = createView3D();
   setupToggle(map, view3d);
+  for (const id of ['v-2d', 'v-3d']) $(id).addEventListener('click', () => devils.refresh()); // pause/resume the devil loop
 
-  let lastVisKey = null, lastHeading = null, lastDevils = null;
+  let lastVisKey = null, lastHeading = null;
   function renderWeather({ inputs, derived }) {
     const C = store0.data.C, a = inputs.astronaut;
     haze.setStyle({ fillOpacity: Math.min(HAZE_MAX, inputs.tau * HAZE_PER_TAU) });
     seeRing.setLatLng([a.lat, a.lon]).setRadius(derived.limits.visibilityKm * 1000);
-    const devilHours = inputs.ltst >= C.dust_devil_peak_start_ltst && inputs.ltst <= C.dust_devil_peak_end_ltst;
-    const key = devilHours ? `${a.lat.toFixed(3)},${a.lon.toFixed(3)}` : null;
-    if (key === lastDevils) return;
-    lastDevils = key;
-    devils.clearLayers();
-    if (!devilHours) return;
-    const mPerDegLat = 2 * Math.PI * 3396190 / 360; // Mars: ~59.3 km per degree of latitude
-    for (const [dx, dy] of DEVIL_OFFSETS_M) {
-      const lat = a.lat + dy / mPerDegLat, lon = a.lon + dx / (mPerDegLat * Math.cos(a.lat * Math.PI / 180));
-      L.marker([lat, lon], { icon: L.divIcon({ className: 'devil', html: '<span></span>', iconSize: [36, 36] }), interactive: true, keyboard: false })
-        .bindTooltip('Dust-devil hours: illustrative swirl, not a forecast position')
-        .addTo(devils);
-    }
+    devils.update(inputs.ltst >= C.dust_devil_peak_start_ltst && inputs.ltst <= C.dust_devil_peak_end_ltst, a);
   }
   function render(store) {
     const { inputs, derived } = store;
